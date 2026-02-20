@@ -277,7 +277,10 @@ impl State {
         let input = search_input::view(&self.query);
         let results = result_list::view(&self.results, self.selected);
 
-        let content = column![input, results].spacing(8).padding(Padding::new(12.0));
+        let content = column![input, results]
+            .spacing(8)
+            .padding(Padding::new(12.0))
+            .height(Fill);
 
         let main = container(content)
             .width(Fill)
@@ -501,6 +504,7 @@ impl State {
         self.results.clear();
         self.matcher.update_query("");
     }
+
 }
 
 async fn load_items() -> Vec<SourceItem> {

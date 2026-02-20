@@ -1,21 +1,31 @@
-use iced::widget::{column, container, mouse_area, scrollable, text, Column};
+use iced::widget::{column, container, mouse_area, text, Column};
 use iced::{Element, Fill, Padding};
 
 use crate::app::Message;
 use crate::source::SourceItem;
 use crate::ui::theme;
 
-/// Maximum number of visible results
-const MAX_VISIBLE: usize = 8;
+/// Maximum number of items visible at once
+const VISIBLE_COUNT: usize = 8;
 
-/// Build the result list widget
+/// Build the result list widget.
+/// Shows a window of VISIBLE_COUNT items around the selected index.
 pub fn view<'a>(results: &'a [SourceItem], selected_index: usize) -> Element<'a, Message> {
     if results.is_empty() {
         return column![].into();
     }
 
+    // Calculate visible window: keep selected item in view
+    let start = if selected_index + 1 >= VISIBLE_COUNT {
+        selected_index + 1 - VISIBLE_COUNT
+    } else {
+        0
+    };
+    let end = (start + VISIBLE_COUNT).min(results.len());
+
     let mut rows = Column::new().spacing(2);
-    for (i, item) in results.iter().take(MAX_VISIBLE).enumerate() {
+    for i in start..end {
+        let item = &results[i];
         let is_selected = i == selected_index;
         let style = if is_selected {
             theme::result_row_selected as fn(&iced::Theme) -> container::Style
@@ -44,5 +54,5 @@ pub fn view<'a>(results: &'a [SourceItem], selected_index: usize) -> Element<'a,
         rows = rows.push(clickable);
     }
 
-    scrollable(rows).into()
+    rows.into()
 }
