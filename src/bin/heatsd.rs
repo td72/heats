@@ -1,17 +1,11 @@
-mod app;
-mod config;
-mod hotkey;
-mod matcher;
-mod platform;
-mod source;
-mod ui;
-
 use std::sync::Mutex;
 
-use app::State;
 use global_hotkey::GlobalHotKeyManager;
 
-use crate::config::Config;
+use heats::app::{self, State};
+use heats::config::{self, Config};
+use heats::hotkey;
+use heats::ipc;
 
 static BOOT_PARAMS: Mutex<Option<(Config, GlobalHotKeyManager, u32)>> = Mutex::new(None);
 
@@ -30,6 +24,13 @@ fn main() -> iced::Result {
         .init();
 
     let config = config::load();
+
+    // Clean up stale socket from previous run
+    let sock = ipc::socket_path();
+    if sock.exists() {
+        let _ = std::fs::remove_file(&sock);
+        tracing::info!("Removed stale socket: {}", sock.display());
+    }
 
     // Initialize global hotkey manager on the main thread (macOS requirement)
     let (manager, registered_hotkey) = hotkey::init_manager(&config.hotkey);

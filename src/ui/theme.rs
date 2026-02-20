@@ -1,4 +1,4 @@
-use iced::widget::{container, text, text_input};
+use iced::widget::{container, text_input};
 use iced::{Border, Color, Shadow, Theme};
 
 /// Semi-transparent dark background color for the launcher window
@@ -26,14 +26,14 @@ const ACCENT: Color = Color {
 };
 
 /// Text color
-const TEXT_PRIMARY: Color = Color {
+pub const TEXT_PRIMARY: Color = Color {
     r: 0.9,
     g: 0.9,
     b: 0.92,
     a: 1.0,
 };
 
-const TEXT_SECONDARY: Color = Color {
+pub const TEXT_SECONDARY: Color = Color {
     r: 0.55,
     g: 0.55,
     b: 0.6,
@@ -118,19 +118,5 @@ pub fn result_row_selected(theme: &Theme) -> container::Style {
         },
         text_color: Some(TEXT_PRIMARY),
         ..container::Style::default()
-    }
-}
-
-/// Style for result item name text
-pub fn result_name(_theme: &Theme) -> text::Style {
-    text::Style {
-        color: Some(TEXT_PRIMARY),
-    }
-}
-
-/// Style for result item path/subtitle text
-pub fn result_subtitle(_theme: &Theme) -> text::Style {
-    text::Style {
-        color: Some(TEXT_SECONDARY),
     }
 }

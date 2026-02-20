@@ -14,38 +14,35 @@ pub fn view<'a>(results: &'a [SourceItem], selected_index: usize) -> Element<'a,
         return column![].into();
     }
 
-    let visible = results.iter().take(MAX_VISIBLE).enumerate();
-    let rows: Vec<Element<'a, Message>> = visible
-        .map(|(i, item)| {
-            let is_selected = i == selected_index;
-            let style = if is_selected {
-                theme::result_row_selected as fn(&iced::Theme) -> container::Style
-            } else {
-                theme::result_row
-            };
+    let mut rows = Column::new().spacing(2);
+    for (i, item) in results.iter().take(MAX_VISIBLE).enumerate() {
+        let is_selected = i == selected_index;
+        let style = if is_selected {
+            theme::result_row_selected as fn(&iced::Theme) -> container::Style
+        } else {
+            theme::result_row
+        };
 
-            let name = text(&item.title).size(16).style(theme::result_name);
+        let name = text(&item.title).size(16).color(theme::TEXT_PRIMARY);
 
-            let row_content: Element<'a, Message> = if let Some(subtitle) = &item.subtitle {
-                column![name, text(subtitle).size(12).style(theme::result_subtitle)]
-                    .spacing(2)
-                    .into()
-            } else {
-                name.into()
-            };
-
-            let row = container(row_content)
-                .padding(Padding::from([8, 12]))
-                .width(Fill)
-                .style(style);
-
-            mouse_area(row)
-                .on_press(Message::SelectAndExecute(i))
+        let row_content: Element<'a, Message> = if let Some(subtitle) = &item.subtitle {
+            column![name, text(subtitle).size(12).color(theme::TEXT_SECONDARY)]
+                .spacing(2)
                 .into()
-        })
-        .collect();
+        } else {
+            name.into()
+        };
 
-    let list = Column::from_vec(rows).spacing(2);
+        let row = container(row_content)
+            .padding(Padding::from([8, 12]))
+            .width(Fill)
+            .style(style);
 
-    scrollable(list).height(Fill).into()
+        let clickable = mouse_area(row)
+            .on_press(Message::SelectAndExecute(i));
+
+        rows = rows.push(clickable);
+    }
+
+    scrollable(rows).into()
 }

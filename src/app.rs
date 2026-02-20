@@ -1,9 +1,13 @@
+use std::sync::{Arc, Mutex};
+
 use iced::widget::{column, container};
 use iced::window;
 use iced::{event, keyboard, Color, Element, Fill, Padding, Point, Size, Subscription, Task, Theme};
+use tokio::sync::oneshot;
 
 use crate::config::{Config, WindowMode};
 use crate::hotkey::{self, HotkeyMessage};
+use crate::ipc;
 use crate::matcher::engine::Matcher;
 use crate::source::applications::ApplicationsSource;
 use crate::source::{SourceItem, SourceRegistry};
@@ -27,6 +31,21 @@ pub struct State {
 
     _hotkey_manager: global_hotkey::GlobalHotKeyManager,
     hotkey_id: u32,
+
+    /// Active dmenu session response channel
+    dmenu_tx: Option<oneshot::Sender<Option<String>>>,
+    /// Whether current session is dmenu (external items) vs built-in
+    is_dmenu_session: bool,
+}
+
+/// Wrapper to make oneshot::Sender cloneable for Message (taken once via take()).
+#[derive(Clone)]
+pub struct ResponseSender(pub Arc<Mutex<Option<oneshot::Sender<Option<String>>>>>);
+
+impl std::fmt::Debug for ResponseSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ResponseSender")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +59,10 @@ pub enum Message {
     MatcherTick,
     KeyEvent(keyboard::Event),
     Hotkey(HotkeyMessage),
+    DmenuSession {
+        items: Vec<String>,
+        response_tx: ResponseSender,
+    },
 }
 
 impl State {
@@ -100,6 +123,8 @@ impl State {
             fixed_display,
             _hotkey_manager: manager,
             hotkey_id,
+            dmenu_tx: None,
+            is_dmenu_session: false,
         };
 
         let load_task = Task::perform(async { load_items().await }, Message::ItemsLoaded);
@@ -113,6 +138,7 @@ impl State {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::WindowOpened(id) => {
+                tracing::debug!("WindowOpened: id={:?}, is_dmenu={}", id, self.is_dmenu_session);
                 self.window_id = Some(id);
                 // Normal mode: window just opened, focus the input
                 Task::batch([
@@ -121,11 +147,18 @@ impl State {
                 ])
             }
             Message::WindowClosed(id) => {
+                tracing::debug!(
+                    "WindowClosed: id={:?}, current_window_id={:?}, is_dmenu={}",
+                    id,
+                    self.window_id,
+                    self.is_dmenu_session
+                );
                 if self.window_id == Some(id) {
                     self.window_id = None;
+                    self.visible = false;
+                    self.cancel_dmenu_session();
+                    self.reset_state();
                 }
-                self.visible = false;
-                self.reset_state();
                 Task::none()
             }
             Message::QueryChanged(query) => {
@@ -136,7 +169,10 @@ impl State {
             }
             Message::Execute => {
                 if let Some(item) = self.results.get(self.selected) {
-                    if let Err(e) = self.sources.execute(item) {
+                    if self.is_dmenu_session {
+                        // Dmenu mode: send selected title back to client
+                        self.send_dmenu_response(Some(item.title.clone()));
+                    } else if let Err(e) = self.sources.execute(item) {
                         tracing::error!("Failed to execute: {}", e);
                     }
                 }
@@ -145,13 +181,20 @@ impl State {
             Message::SelectAndExecute(index) => {
                 self.selected = index;
                 if let Some(item) = self.results.get(self.selected) {
-                    if let Err(e) = self.sources.execute(item) {
+                    if self.is_dmenu_session {
+                        self.send_dmenu_response(Some(item.title.clone()));
+                    } else if let Err(e) = self.sources.execute(item) {
                         tracing::error!("Failed to execute: {}", e);
                     }
                 }
                 self.hide()
             }
             Message::ItemsLoaded(items) => {
+                // Ignore app items while a dmenu session is active
+                if self.is_dmenu_session {
+                    tracing::debug!("ItemsLoaded ignored (dmenu session active)");
+                    return Task::none();
+                }
                 self.all_items = items;
                 self.matcher.set_items(self.all_items.clone());
                 Task::none()
@@ -196,7 +239,35 @@ impl State {
                 if self.visible {
                     self.hide()
                 } else {
+                    // If a dmenu session is active, cancel it before showing app launcher
+                    if self.is_dmenu_session {
+                        self.cancel_dmenu_session();
+                        self.reset_state();
+                    }
                     self.show()
+                }
+            }
+            Message::DmenuSession { items, response_tx } => {
+                tracing::debug!(
+                    "DmenuSession: {} items, visible={}, window_id={:?}",
+                    items.len(),
+                    self.visible,
+                    self.window_id
+                );
+
+                // If already visible, hide first then show dmenu
+                if self.visible {
+                    let hide_task = self.hide();
+                    // hide() already cancelled any active dmenu + reset state
+
+                    let tx = response_tx.0.lock().unwrap().take();
+                    self.start_dmenu_session(items, tx);
+                    let show_task = self.show_dmenu();
+                    Task::batch([hide_task, show_task])
+                } else {
+                    let tx = response_tx.0.lock().unwrap().take();
+                    self.start_dmenu_session(items, tx);
+                    self.show_dmenu()
                 }
             }
         }
@@ -219,6 +290,7 @@ impl State {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
             hotkey::subscription(self.hotkey_id).map(Message::Hotkey),
+            ipc::server::dmenu_subscription(),
         ];
 
         // Normal mode needs close events to track window lifecycle
@@ -268,6 +340,60 @@ impl State {
         }
     }
 
+    // ---- Dmenu ----
+
+    fn start_dmenu_session(
+        &mut self,
+        items: Vec<String>,
+        tx: Option<oneshot::Sender<Option<String>>>,
+    ) {
+        self.dmenu_tx = tx;
+        self.is_dmenu_session = true;
+
+        // Convert strings to SourceItems for the matcher
+        let source_items: Vec<SourceItem> = items
+            .into_iter()
+            .map(|title| SourceItem {
+                title,
+                subtitle: None,
+                exec_path: String::new(),
+                source_name: "dmenu".to_string(),
+            })
+            .collect();
+
+        self.all_items = source_items;
+        self.results = self.all_items.clone();
+        self.matcher.set_items(self.all_items.clone());
+    }
+
+    fn show_dmenu(&mut self) -> Task<Message> {
+        self.visible = true;
+        tracing::debug!(
+            "show_dmenu: results={}, all_items={}",
+            self.results.len(),
+            self.all_items.len()
+        );
+
+        match self.config.window.mode {
+            WindowMode::Fixed => self.show_fixed(Task::none()),
+            WindowMode::Normal => self.show_normal(Task::none()),
+        }
+    }
+
+    fn send_dmenu_response(&mut self, response: Option<String>) {
+        if let Some(tx) = self.dmenu_tx.take() {
+            let _ = tx.send(response);
+        }
+        self.is_dmenu_session = false;
+    }
+
+    fn cancel_dmenu_session(&mut self) {
+        if self.is_dmenu_session {
+            // Send None (cancelled) to the client
+            self.send_dmenu_response(None);
+        }
+    }
+
     // ---- Show / Hide ----
 
     fn show(&mut self) -> Task<Message> {
@@ -282,6 +408,8 @@ impl State {
 
     fn hide(&mut self) -> Task<Message> {
         self.visible = false;
+        // If this is a dmenu session, cancel it (send None to client)
+        self.cancel_dmenu_session();
         self.reset_state();
 
         match self.config.window.mode {
@@ -293,16 +421,18 @@ impl State {
     // -- Normal mode: open/close window each time --
 
     fn show_normal(&mut self, load_task: Task<Message>) -> Task<Message> {
-        let display = crate::platform::macos::focused_display_bounds();
+        let disp_bounds = crate::platform::macos::focused_display_bounds();
         let pos = Self::center_on_display(
-            &display,
+            &disp_bounds,
             self.config.window.width,
             self.config.window.height,
         );
+        tracing::debug!("show_normal: disp_bounds={:?}, pos={:?}", disp_bounds, pos);
 
         let (_id, open_task) = window::open(window::Settings {
             size: Size::new(self.config.window.width, self.config.window.height),
             position: window::Position::Specific(pos),
+            visible: true,
             decorations: false,
             transparent: true,
             level: window::Level::AlwaysOnTop,
