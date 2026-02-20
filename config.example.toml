@@ -1,0 +1,16 @@
+[hotkey]
+modifiers = "Cmd"
+key = "Semicolon"   # Cmd+;
+
+[window]
+width = 600.0
+height = 400.0
+
+# "normal" = マウスカーソルのあるディスプレイに表示 (デフォルト)
+# "fixed"  = 指定ディスプレイに固定 (AeroSpace等のタイリングWM向け)
+mode = "fixed"
+
+# fixed モード時のディスプレイ名 (部分一致)
+# 例: "LG", "Built-in", "DELL" など
+# 空欄の場合は起動時のマウスカーソル位置のディスプレイを使用
+display = "LG"
