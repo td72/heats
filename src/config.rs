@@ -13,6 +13,8 @@ pub struct Config {
 pub struct HotkeyConfig {
     pub modifiers: String,
     pub key: String,
+    pub windows_modifiers: String,
+    pub windows_key: String,
 }
 
 /// Window management mode
@@ -50,6 +52,8 @@ impl Default for HotkeyConfig {
         Self {
             modifiers: "Cmd".to_string(),
             key: "Semicolon".to_string(),
+            windows_modifiers: "Cmd".to_string(),
+            windows_key: "Quote".to_string(),
         }
     }
 }

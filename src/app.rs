@@ -10,6 +10,7 @@ use crate::hotkey::{self, HotkeyMessage};
 use crate::ipc;
 use crate::matcher::engine::Matcher;
 use crate::source::applications::ApplicationsSource;
+use crate::source::windows::WindowsSource;
 use crate::source::{SourceItem, SourceRegistry};
 use crate::ui::{result_list, search_input, theme};
 
@@ -31,6 +32,7 @@ pub struct State {
 
     _hotkey_manager: global_hotkey::GlobalHotKeyManager,
     hotkey_id: u32,
+    hotkey_id_windows: u32,
 
     /// Active dmenu session response channel
     dmenu_tx: Option<oneshot::Sender<Option<String>>>,
@@ -70,9 +72,11 @@ impl State {
         config: Config,
         manager: global_hotkey::GlobalHotKeyManager,
         hotkey_id: u32,
+        hotkey_id_windows: u32,
     ) -> (Self, Task<Message>) {
         let mut sources = SourceRegistry::new();
         sources.register(Box::new(ApplicationsSource::new()));
+        sources.register(Box::new(WindowsSource::new()));
 
         let fixed_display = if config.window.display.is_empty() {
             crate::platform::macos::focused_display_bounds()
@@ -123,6 +127,7 @@ impl State {
             fixed_display,
             _hotkey_manager: manager,
             hotkey_id,
+            hotkey_id_windows,
             dmenu_tx: None,
             is_dmenu_session: false,
         };
@@ -247,6 +252,18 @@ impl State {
                     self.show()
                 }
             }
+            Message::Hotkey(HotkeyMessage::WindowsPressed) => {
+                tracing::debug!("WindowsPressed: visible={}", self.visible);
+                if self.visible {
+                    self.hide()
+                } else {
+                    if self.is_dmenu_session {
+                        self.cancel_dmenu_session();
+                        self.reset_state();
+                    }
+                    self.show_windows()
+                }
+            }
             Message::DmenuSession { items, response_tx } => {
                 tracing::debug!(
                     "DmenuSession: {} items, visible={}, window_id={:?}",
@@ -292,7 +309,7 @@ impl State {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
-            hotkey::subscription(self.hotkey_id).map(Message::Hotkey),
+            hotkey::subscription(self.hotkey_id, self.hotkey_id_windows).map(Message::Hotkey),
             ipc::server::dmenu_subscription(),
         ];
 
@@ -410,6 +427,16 @@ impl State {
         }
     }
 
+    fn show_windows(&mut self) -> Task<Message> {
+        self.visible = true;
+        let load_task = Task::perform(async { load_windows().await }, Message::ItemsLoaded);
+
+        match self.config.window.mode {
+            WindowMode::Fixed => self.show_fixed(load_task),
+            WindowMode::Normal => self.show_normal(load_task),
+        }
+    }
+
     fn hide(&mut self) -> Task<Message> {
         self.visible = false;
         // If this is a dmenu session, cancel it (send None to client)
@@ -509,7 +536,20 @@ impl State {
 }
 
 async fn load_items() -> Vec<SourceItem> {
-    let source = ApplicationsSource::new();
     use crate::source::Source;
-    source.load().await
+    let app_source = ApplicationsSource::new();
+    let win_source = WindowsSource::new();
+    let (apps, wins) = tokio::join!(app_source.load(), win_source.load());
+    tracing::debug!("load_items: {} apps, {} windows", apps.len(), wins.len());
+    let mut items = apps;
+    items.extend(wins);
+    items
+}
+
+async fn load_windows() -> Vec<SourceItem> {
+    use crate::source::Source;
+    let win_source = WindowsSource::new();
+    let items = win_source.load().await;
+    tracing::debug!("load_windows: {} items loaded", items.len());
+    items
 }

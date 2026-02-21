@@ -8,7 +8,7 @@ use heats::config::{self, Config};
 use heats::hotkey;
 use heats::ipc;
 
-static BOOT_PARAMS: Mutex<Option<(Config, GlobalHotKeyManager, u32)>> = Mutex::new(None);
+static BOOT_PARAMS: Mutex<Option<(Config, GlobalHotKeyManager, u32, u32)>> = Mutex::new(None);
 
 fn boot() -> (State, iced::Task<app::Message>) {
     let params = BOOT_PARAMS
@@ -16,7 +16,7 @@ fn boot() -> (State, iced::Task<app::Message>) {
         .unwrap()
         .take()
         .expect("boot() called more than once");
-    State::new(params.0, params.1, params.2)
+    State::new(params.0, params.1, params.2, params.3)
 }
 
 fn main() {
@@ -73,13 +73,17 @@ fn cmd_run() {
         process::exit(0);
     });
 
+    // Request Screen Recording permission for window listing
+    heats::platform::macos::ensure_screen_capture_access();
+
     // Initialize global hotkey manager on the main thread (macOS requirement)
-    let (manager, registered_hotkey) = hotkey::init_manager(&config.hotkey);
-    let hotkey_id = registered_hotkey.id();
+    let (manager, primary_hotkey, windows_hotkey) = hotkey::init_manager(&config.hotkey);
+    let hotkey_id = primary_hotkey.id();
+    let hotkey_id_windows = windows_hotkey.id();
 
     tracing::info!("Starting Heats launcher");
 
-    *BOOT_PARAMS.lock().unwrap() = Some((config, manager, hotkey_id));
+    *BOOT_PARAMS.lock().unwrap() = Some((config, manager, hotkey_id, hotkey_id_windows));
 
     let result = iced::daemon(boot, State::update, State::view)
         .title(State::title)

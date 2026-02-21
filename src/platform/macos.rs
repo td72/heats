@@ -4,10 +4,77 @@ use core_graphics::display::CGDisplay;
 use objc::runtime::Object;
 use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
 
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+/// Request Screen Recording permission if not already granted.
+/// This shows the system dialog on first call so the user can grant access.
+pub fn ensure_screen_capture_access() {
+    unsafe {
+        if CGPreflightScreenCaptureAccess() {
+            tracing::info!("Screen Recording permission: granted");
+        } else {
+            tracing::info!("Screen Recording permission: not granted, requesting...");
+            let granted = CGRequestScreenCaptureAccess();
+            tracing::info!("Screen Recording permission request result: {}", granted);
+        }
+    }
+}
+
 /// Open a macOS application by its path using the `open` command
 pub fn open_application(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Command::new("open").arg("-a").arg(path).spawn()?;
     Ok(())
+}
+
+/// Activate the application with the given PID, bringing its windows to front.
+pub fn focus_window(pid: i32) {
+    unsafe {
+        let app: *mut Object = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid
+        ];
+        if !app.is_null() {
+            // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
+            let options: u64 = 3;
+            let _: i8 = msg_send![app, activateWithOptions: options];
+        } else {
+            tracing::warn!("focus_window: no app for pid={}", pid);
+        }
+    }
+}
+
+/// Get the bundle path (.app) for a running application by PID.
+pub fn bundle_path_for_pid(pid: i32) -> Option<String> {
+    unsafe {
+        let app: *mut Object = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid
+        ];
+        if app.is_null() {
+            return None;
+        }
+        let bundle_url: *mut Object = msg_send![app, bundleURL];
+        if bundle_url.is_null() {
+            return None;
+        }
+        let path: *mut Object = msg_send![bundle_url, path];
+        if path.is_null() {
+            return None;
+        }
+        let c_str: *const i8 = msg_send![path, UTF8String];
+        if c_str.is_null() {
+            return None;
+        }
+        Some(
+            std::ffi::CStr::from_ptr(c_str)
+                .to_str()
+                .ok()?
+                .to_string(),
+        )
+    }
 }
 
 /// Get the bounds of the display that has keyboard focus (NSScreen.mainScreen).
