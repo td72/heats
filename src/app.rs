@@ -9,8 +9,6 @@ use crate::config::{Config, WindowMode};
 use crate::hotkey::{self, HotkeyMessage};
 use crate::ipc;
 use crate::matcher::engine::Matcher;
-use crate::source::applications::ApplicationsSource;
-use crate::source::windows::WindowsSource;
 use crate::source::{SourceItem, SourceRegistry};
 use crate::ui::{result_list, search_input, theme};
 
@@ -74,9 +72,7 @@ impl State {
         hotkey_id: u32,
         hotkey_id_windows: u32,
     ) -> (Self, Task<Message>) {
-        let mut sources = SourceRegistry::new();
-        sources.register(Box::new(ApplicationsSource::new()));
-        sources.register(Box::new(WindowsSource::new()));
+        let sources = SourceRegistry::new();
 
         let fixed_display = if config.window.display.is_empty() {
             crate::platform::macos::focused_display_bounds()
@@ -132,7 +128,7 @@ impl State {
             is_dmenu_session: false,
         };
 
-        let load_task = Task::perform(async { load_items().await }, Message::ItemsLoaded);
+        let load_task = Task::perform(SourceRegistry::load_items(None), Message::ItemsLoaded);
         (state, Task::batch([boot_task, load_task]))
     }
 
@@ -419,7 +415,7 @@ impl State {
 
     fn show(&mut self) -> Task<Message> {
         self.visible = true;
-        let load_task = Task::perform(async { load_items().await }, Message::ItemsLoaded);
+        let load_task = Task::perform(SourceRegistry::load_items(None), Message::ItemsLoaded);
 
         match self.config.window.mode {
             WindowMode::Fixed => self.show_fixed(load_task),
@@ -429,7 +425,10 @@ impl State {
 
     fn show_windows(&mut self) -> Task<Message> {
         self.visible = true;
-        let load_task = Task::perform(async { load_windows().await }, Message::ItemsLoaded);
+        let load_task = Task::perform(
+            SourceRegistry::load_items(Some(vec!["windows".into()])),
+            Message::ItemsLoaded,
+        );
 
         match self.config.window.mode {
             WindowMode::Fixed => self.show_fixed(load_task),
@@ -533,23 +532,4 @@ impl State {
         self.matcher.update_query("");
     }
 
-}
-
-async fn load_items() -> Vec<SourceItem> {
-    use crate::source::Source;
-    let app_source = ApplicationsSource::new();
-    let win_source = WindowsSource::new();
-    let (apps, wins) = tokio::join!(app_source.load(), win_source.load());
-    tracing::debug!("load_items: {} apps, {} windows", apps.len(), wins.len());
-    let mut items = apps;
-    items.extend(wins);
-    items
-}
-
-async fn load_windows() -> Vec<SourceItem> {
-    use crate::source::Source;
-    let win_source = WindowsSource::new();
-    let items = win_source.load().await;
-    tracing::debug!("load_windows: {} items loaded", items.len());
-    items
 }

@@ -1,9 +1,10 @@
 pub mod applications;
 pub mod windows;
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
+
+use applications::ApplicationsSource;
+use windows::WindowsSource;
 
 /// Icon data for a source item
 #[derive(Debug, Clone)]
@@ -44,47 +45,70 @@ pub trait Source: Send + Sync {
     }
 
     /// Load all items from this source
-    fn load(&self) -> Pin<Box<dyn Future<Output = Vec<SourceItem>> + Send>>;
+    fn load(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<SourceItem>> + Send>>;
 
     /// Execute the given item
     fn execute(&self, item: &SourceItem) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-/// Registry holding all active sources
+type SourceFactory = fn() -> Box<dyn Source>;
+
+/// Registry holding all active sources (factory-based)
 pub struct SourceRegistry {
-    sources: Vec<Box<dyn Source>>,
+    factories: Vec<(&'static str, SourceFactory)>,
+}
+
+impl Default for SourceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SourceRegistry {
+    /// Create a registry with all sources registered
     pub fn new() -> Self {
-        Self {
-            sources: Vec::new(),
+        let mut reg = Self {
+            factories: Vec::new(),
+        };
+        reg.register("applications", || Box::new(ApplicationsSource::new()));
+        reg.register("windows", || Box::new(WindowsSource::new()));
+        reg
+    }
+
+    fn register(&mut self, name: &'static str, factory: SourceFactory) {
+        self.factories.push((name, factory));
+    }
+
+    /// Load items from sources. Pass `None` for all sources, or `Some(names)` to filter.
+    pub async fn load_items(filter: Option<Vec<String>>) -> Vec<SourceItem> {
+        let registry = Self::new();
+        let sources: Vec<Box<dyn Source>> = match &filter {
+            Some(names) => registry
+                .factories
+                .iter()
+                .filter(|(n, _)| names.iter().any(|f| f == n))
+                .map(|(_, f)| f())
+                .collect(),
+            None => registry.factories.iter().map(|(_, f)| f()).collect(),
+        };
+
+        let mut set = tokio::task::JoinSet::new();
+        for source in sources {
+            set.spawn(async move { source.load().await });
         }
-    }
 
-    pub fn register(&mut self, source: Box<dyn Source>) {
-        self.sources.push(source);
-    }
-
-    pub fn sources(&self) -> &[Box<dyn Source>] {
-        &self.sources
-    }
-
-    /// Load items from all sources
-    pub async fn load_all(&self) -> Vec<SourceItem> {
-        let mut all_items = Vec::new();
-        for source in &self.sources {
-            let items = source.load().await;
-            all_items.extend(items);
+        let mut items = Vec::new();
+        while let Some(Ok(result)) = set.join_next().await {
+            items.extend(result);
         }
-        all_items
+        items
     }
 
     /// Find the source that owns an item and execute it
     pub fn execute(&self, item: &SourceItem) -> Result<(), Box<dyn std::error::Error>> {
-        for source in &self.sources {
-            if source.name() == item.source_name {
-                return source.execute(item);
+        for (name, factory) in &self.factories {
+            if *name == item.source_name {
+                return factory().execute(item);
             }
         }
         Err(format!("No source found for: {}", item.source_name).into())
