@@ -5,23 +5,38 @@ use crate::app::Message;
 use crate::source::SourceItem;
 use crate::ui::theme;
 
-/// Maximum number of items visible at once
-const VISIBLE_COUNT: usize = 8;
+/// Estimated row height in pixels (padding + title + subtitle + spacing)
+const ROW_HEIGHT_ESTIMATE: f32 = 54.0;
+/// Fixed overhead: outer padding (12*2) + search input (~44) + spacing (8)
+const LAYOUT_OVERHEAD: f32 = 76.0;
+
+/// Calculate how many items fit in the available window height.
+fn visible_count(window_height: f32) -> usize {
+    let available = (window_height - LAYOUT_OVERHEAD).max(0.0);
+    let count = (available / ROW_HEIGHT_ESTIMATE) as usize;
+    count.max(1)
+}
 
 /// Build the result list widget.
-/// Shows a window of VISIBLE_COUNT items around the selected index.
-pub fn view<'a>(results: &'a [SourceItem], selected_index: usize) -> Element<'a, Message> {
+/// Shows a window of items around the selected index, sized to fit the window.
+pub fn view<'a>(
+    results: &'a [SourceItem],
+    selected_index: usize,
+    window_height: f32,
+) -> Element<'a, Message> {
     if results.is_empty() {
         return column![].into();
     }
 
+    let max_visible = visible_count(window_height);
+
     // Calculate visible window: keep selected item in view
-    let start = if selected_index + 1 >= VISIBLE_COUNT {
-        selected_index + 1 - VISIBLE_COUNT
+    let start = if selected_index + 1 >= max_visible {
+        selected_index + 1 - max_visible
     } else {
         0
     };
-    let end = (start + VISIBLE_COUNT).min(results.len());
+    let end = (start + max_visible).min(results.len());
 
     let mut rows = Column::new().spacing(2);
     for i in start..end {
@@ -44,12 +59,11 @@ pub fn view<'a>(results: &'a [SourceItem], selected_index: usize) -> Element<'a,
         };
 
         let row = container(row_content)
-            .padding(Padding::from([8, 12]))
+            .padding(Padding::from([6, 12]))
             .width(Fill)
             .style(style);
 
-        let clickable = mouse_area(row)
-            .on_press(Message::SelectAndExecute(i));
+        let clickable = mouse_area(row).on_press(Message::SelectAndExecute(i));
 
         rows = rows.push(clickable);
     }

@@ -275,7 +275,7 @@ impl State {
 
     pub fn view(&self, _window: window::Id) -> Element<'_, Message> {
         let input = search_input::view(&self.query);
-        let results = result_list::view(&self.results, self.selected);
+        let results = result_list::view(&self.results, self.selected, self.config.window.height);
 
         let content = column![input, results]
             .spacing(8)
