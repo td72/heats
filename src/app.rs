@@ -361,6 +361,7 @@ impl State {
                 subtitle: None,
                 exec_path: String::new(),
                 source_name: "dmenu".to_string(),
+                icon: None,
             })
             .collect();
 

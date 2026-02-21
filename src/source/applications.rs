@@ -2,6 +2,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+use crate::icon;
 use crate::platform;
 use crate::source::{Source, SourceItem};
 
@@ -40,11 +41,13 @@ impl ApplicationsSource {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
+                    let app_icon = icon::load_app_icon(&path);
                     items.push(SourceItem {
                         title: name,
                         subtitle: Some(path.to_string_lossy().to_string()),
                         exec_path: path.to_string_lossy().to_string(),
                         source_name: "applications".to_string(),
+                        icon: app_icon,
                     });
                 }
             }

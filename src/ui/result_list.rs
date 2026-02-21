@@ -1,8 +1,8 @@
-use iced::widget::{column, container, mouse_area, text, Column};
+use iced::widget::{column, container, image, mouse_area, row, text, Column};
 use iced::{Element, Fill, Padding};
 
 use crate::app::Message;
-use crate::source::SourceItem;
+use crate::source::{IconData, SourceItem};
 use crate::ui::theme;
 
 /// Estimated row height in pixels (padding + title + subtitle + spacing)
@@ -50,12 +50,33 @@ pub fn view<'a>(
 
         let name = text(&item.title).size(16).color(theme::TEXT_PRIMARY);
 
-        let row_content: Element<'a, Message> = if let Some(subtitle) = &item.subtitle {
+        let text_column: Element<'a, Message> = if let Some(subtitle) = &item.subtitle {
             column![name, text(subtitle).size(12).color(theme::TEXT_SECONDARY)]
                 .spacing(2)
                 .into()
         } else {
             name.into()
+        };
+
+        let row_content: Element<'a, Message> = match &item.icon {
+            Some(IconData::Rgba {
+                width,
+                height,
+                pixels,
+            }) => {
+                let handle =
+                    image::Handle::from_rgba(*width, *height, pixels.as_ref().clone());
+                let icon = image(handle).width(24).height(24);
+                row![icon, text_column]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+            }
+            Some(IconData::Text(s)) => row![text(s).size(20), text_column]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            None => text_column,
         };
 
         let row = container(row_content)

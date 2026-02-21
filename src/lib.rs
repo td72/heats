@@ -1,6 +1,7 @@
 pub mod app;
 pub mod config;
 pub mod hotkey;
+pub mod icon;
 pub mod ipc;
 pub mod matcher;
 pub mod platform;

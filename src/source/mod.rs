@@ -2,6 +2,20 @@ pub mod applications;
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+
+/// Icon data for a source item
+#[derive(Debug, Clone)]
+pub enum IconData {
+    /// Pre-loaded RGBA pixel data (Arc to avoid expensive clones)
+    Rgba {
+        width: u32,
+        height: u32,
+        pixels: Arc<Vec<u8>>,
+    },
+    /// Text/emoji fallback (e.g. "📁", "🔍")
+    Text(String),
+}
 
 /// An item returned by a Source
 #[derive(Debug, Clone)]
@@ -14,6 +28,8 @@ pub struct SourceItem {
     pub exec_path: String,
     /// Which source this item came from
     pub source_name: String,
+    /// Optional icon for display
+    pub icon: Option<IconData>,
 }
 
 /// Trait for item sources (extensibility point)
