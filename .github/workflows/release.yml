@@ -6,6 +6,9 @@ on:
     branches: [main]
   release:
     types: [created]
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
 
 permissions:
   contents: write
@@ -62,3 +65,76 @@ jobs:
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+
+  homebrew:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: td72
+          repositories: homebrew-tap
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v6
+        with:
+          repository: td72/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        shell: bash
+        run: |
+          VERSION="${{ github.event.workflow_run.head_branch }}"
+          VERSION="${VERSION#v}"
+          SHA_MACOS_ARM=$(cut -d ' ' -f 1 heats-aarch64-apple-darwin.tar.gz.sha256)
+
+          cat > homebrew-tap/Formula/heats.rb <<FORMULA
+          class Heats < Formula
+            desc "Rofi-like extensible fuzzy launcher for macOS"
+            homepage "https://github.com/td72/heats"
+            license "MIT"
+            version "${VERSION}"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/td72/heats/releases/download/v#{version}/heats-aarch64-apple-darwin.tar.gz"
+                sha256 "${SHA_MACOS_ARM}"
+              end
+            end
+
+            def install
+              bin.install "heatsd"
+              bin.install "heats"
+            end
+
+            test do
+              assert_predicate bin/"heatsd", :exist?
+              assert_predicate bin/"heatsd", :executable?
+              assert_predicate bin/"heats", :exist?
+              assert_predicate bin/"heats", :executable?
+            end
+          end
+          FORMULA
+
+      - name: Push formula update
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/heats.rb
+          git commit -m "heats v${VERSION}"
+          git push

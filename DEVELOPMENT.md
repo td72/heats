@@ -86,6 +86,7 @@ Two-stage release process:
 
 1. **create-tag**: Triggered when a `release/*` branch PR is merged to `main`. Creates a Git tag and GitHub Release using a GitHub App token.
 2. **publish**: Triggered by the release event. Publishes the crate to crates.io.
+3. **homebrew**: Triggered by Build workflow completion on tags. Updates the formula in `td72/homebrew-tap`.
 
 #### Release Procedure
 
@@ -127,3 +128,14 @@ Choose one of:
 
 - **Trusted publishing** (recommended): Configure in crates.io settings for the `heats` crate
 - **Token-based**: Set `CARGO_REGISTRY_TOKEN` secret in the `release` environment
+
+### 4. Homebrew Tap
+
+The formula at `td72/homebrew-tap` is auto-updated by the `homebrew` job.
+Ensure the GitHub App has access to the `homebrew-tap` repository.
+
+Users install with:
+
+```bash
+brew install td72/tap/heats
+```
