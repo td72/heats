@@ -1,0 +1,17 @@
+[package]
+name = "heats-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "6"
+tokio = { version = "1", features = ["net", "io-util", "sync", "time"] }
+tracing = "0.1"
+core-graphics = "0.24"
+core-foundation = "0.10"
+objc = "0.2"
+libc = "0.2"
+plist = "1"

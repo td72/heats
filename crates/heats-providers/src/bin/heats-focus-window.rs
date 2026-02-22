@@ -1,4 +1,4 @@
-use heats::platform::macos::focus_window;
+use heats_core::platform::macos::focus_window;
 
 fn main() {
     let pid_str = std::env::args()

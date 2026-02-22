@@ -4,7 +4,7 @@ use iced::futures::SinkExt;
 use iced::stream::channel;
 use iced::Subscription;
 
-use crate::config::ModeConfig;
+use heats_core::config::ModeConfig;
 
 /// Message emitted by the hotkey subscription
 #[derive(Debug, Clone)]

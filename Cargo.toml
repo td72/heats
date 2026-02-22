@@ -1,54 +1,10 @@
-[package]
-name = "heats"
-version = "0.1.0"
-edition = "2021"
-description = "A rofi-like extensible fuzzy launcher for macOS"
-authors = ["td72"]
-license = "MIT"
-repository = "https://github.com/td72/heats"
-readme = "README.md"
-keywords = ["launcher", "fuzzy", "macos", "iced", "rofi"]
-categories = ["gui"]
-exclude = [".github/"]
-
-[[bin]]
-name = "heatsd"
-path = "src/bin/heatsd.rs"
-
-[[bin]]
-name = "heats"
-path = "src/bin/heats.rs"
-
-[[bin]]
-name = "heats-list-apps"
-path = "src/bin/heats-list-apps.rs"
-
-[[bin]]
-name = "heats-list-windows"
-path = "src/bin/heats-list-windows.rs"
-
-[[bin]]
-name = "heats-focus-window"
-path = "src/bin/heats-focus-window.rs"
-
-[dependencies]
-iced = { version = "0.14", features = ["tokio", "image"] }
-nucleo = "0.5"
-global-hotkey = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process"] }
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"
-dirs = "6"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-core-graphics = "0.24"
-core-foundation = "0.10"
-objc = "0.2"
-libc = "0.2"
-ctrlc = "3"
-icns = "0.4"
-plist = "1"
-serde_json = "1"
+[workspace]
+members = [
+    "crates/heats-core",
+    "crates/heats-daemon",
+    "crates/heats-providers",
+]
+resolver = "2"
 
 [profile.release]
 strip = true

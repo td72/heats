@@ -1,6 +1,6 @@
-use heats::platform::macos::ensure_screen_capture_access;
-use heats::source::windows::scan_windows_raw;
-use heats::source::DmenuItem;
+use heats_core::platform::macos::ensure_screen_capture_access;
+use heats_core::source::windows::scan_windows_raw;
+use heats_core::source::DmenuItem;
 
 fn main() {
     ensure_screen_capture_access();

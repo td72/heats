@@ -1,5 +1,4 @@
 pub mod client;
-pub mod server;
 
 use std::path::PathBuf;
 

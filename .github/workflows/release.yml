@@ -62,7 +62,11 @@ jobs:
         uses: rust-lang/crates-io-auth-action@v1
 
       - name: Publish to crates.io
-        run: cargo publish
+        run: |
+          cargo publish -p heats-core
+          sleep 30
+          cargo publish -p heats-daemon
+          cargo publish -p heats-providers
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
 
@@ -119,6 +123,9 @@ jobs:
             def install
               bin.install "heatsd"
               bin.install "heats"
+              bin.install "heats-list-apps"
+              bin.install "heats-list-windows"
+              bin.install "heats-focus-window"
             end
 
             test do

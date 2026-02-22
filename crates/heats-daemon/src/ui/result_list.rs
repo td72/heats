@@ -2,8 +2,8 @@ use iced::widget::{column, container, image, mouse_area, row, text, Column};
 use iced::{Element, Fill, Padding};
 
 use crate::app::Message;
-use crate::source::{IconData, SourceItem};
 use crate::ui::theme;
+use heats_core::source::{IconData, SourceItem};
 
 /// Estimated row height in pixels (padding + title + subtitle + spacing)
 const ROW_HEIGHT_ESTIMATE: f32 = 54.0;

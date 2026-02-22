@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nucleo::pattern::{CaseMatching, Normalization};
 use nucleo::{Config, Nucleo};
 
-use crate::source::SourceItem;
+use heats_core::source::SourceItem;
 
 /// Wrapper around nucleo for fuzzy matching
 pub struct Matcher {

@@ -5,9 +5,9 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::config::ProviderConfig;
 use crate::icon;
-use crate::source::{DmenuItem, IconData, SourceItem};
+use heats_core::config::ProviderConfig;
+use heats_core::source::{DmenuItem, IconData, SourceItem};
 
 /// A loaded item with metadata for action resolution
 #[derive(Debug, Clone)]

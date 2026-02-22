@@ -1,12 +1,19 @@
+mod app;
+mod command;
+mod hotkey;
+mod icon;
+mod ipc_server;
+mod matcher;
+mod ui;
+
 use std::sync::Mutex;
 use std::{process, thread, time::Duration};
 
 use global_hotkey::GlobalHotKeyManager;
 
-use heats::app::{self, State};
-use heats::config::{self, Config};
-use heats::hotkey;
-use heats::ipc;
+use crate::app::State;
+use heats_core::config::Config;
+use heats_core::ipc;
 
 type BootParams = (Config, GlobalHotKeyManager, Vec<(u32, String)>);
 
@@ -58,7 +65,7 @@ fn cmd_run() {
         )
         .init();
 
-    let config = config::load();
+    let config = heats_core::config::load();
 
     // Clean up stale socket from previous run
     let sock = ipc::socket_path();

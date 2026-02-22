@@ -1474,18 +1474,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "heats"
+name = "heats-core"
 version = "0.1.0"
 dependencies = [
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
- "ctrlc",
  "dirs",
- "global-hotkey",
- "iced",
- "icns",
  "libc",
- "nucleo",
  "objc",
  "plist",
  "serde",
@@ -1493,7 +1488,35 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "heats-daemon"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "dirs",
+ "global-hotkey",
+ "heats-core",
+ "iced",
+ "icns",
+ "libc",
+ "nucleo",
+ "plist",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "heats-providers"
+version = "0.1.0"
+dependencies = [
+ "heats-core",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

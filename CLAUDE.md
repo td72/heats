@@ -12,10 +12,12 @@ Heats is a **rofi-like extensible fuzzy launcher for macOS**, built with Rust + 
 ## Build & Test
 
 ```bash
-cargo build           # dev build
-cargo clippy          # lint
-cargo run             # run (debug)
-RUST_LOG=heats=debug cargo run  # run with debug logging
+cargo build                          # workspace全体ビルド
+cargo clippy                         # lint
+cargo build -p heats-daemon          # daemon単体ビルド
+cargo build -p heats-providers       # プロバイダ単体ビルド
+cargo run -p heats-daemon            # run daemon (debug)
+RUST_LOG=heats=debug cargo run -p heats-daemon  # run with debug logging
 ```
 
 ## Branch Workflow
@@ -46,13 +48,25 @@ After creating a PR or pushing changes (except when pushing fixes for Copilot re
 
 Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️` refactor, `🔧` config, `📝` docs, etc.
 
-### Key Architecture
+### Key Architecture (Workspace)
 
-- `src/main.rs` — Entry point: hotkey init + iced daemon startup
-- `src/app.rs` — Iced Daemon: State, Message, update, view, subscription
-- `src/config.rs` — Config file loading (~/.config/heats/config.toml)
-- `src/hotkey.rs` — global-hotkey → iced Subscription bridge
-- `src/ui/` — UI components (search_input, result_list, theme)
-- `src/source/` — Source trait + ApplicationsSource (extensible)
-- `src/matcher/` — nucleo fuzzy matching wrapper
-- `src/platform/macos.rs` — macOS native APIs (NSWindow, NSScreen, display detection)
+3-crate workspace: `heats-core` (共有ライブラリ), `heats-daemon` (daemon binary), `heats-providers` (軽量バイナリ群)
+
+#### heats-core (lib) — 共有型 + プラットフォーム API + IPC + config
+- `crates/heats-core/src/source/` — DmenuItem, SourceItem, IconData, scan_apps, scan_windows
+- `crates/heats-core/src/config.rs` — Config, ModeConfig, ProviderConfig, WindowConfig
+- `crates/heats-core/src/platform/macos.rs` — macOS native APIs (NSWindow, NSScreen, focus_window)
+- `crates/heats-core/src/ipc/` — socket_path, PID management, IPC client
+
+#### heats-daemon (bin: heatsd) — iced + fuzzy matching + hotkey
+- `crates/heats-daemon/src/main.rs` — Entry point: hotkey init + iced daemon startup
+- `crates/heats-daemon/src/app.rs` — Iced Daemon: State, Message, update, view, subscription
+- `crates/heats-daemon/src/command.rs` — Provider command execution + item loading
+- `crates/heats-daemon/src/hotkey.rs` — global-hotkey → iced Subscription bridge
+- `crates/heats-daemon/src/ipc_server.rs` — Unix socket server for dmenu protocol
+- `crates/heats-daemon/src/matcher/` — nucleo fuzzy matching wrapper
+- `crates/heats-daemon/src/ui/` — UI components (search_input, result_list, theme)
+
+#### heats-providers (bins: heats, heats-list-apps, heats-list-windows, heats-focus-window)
+- Lightweight binaries that do NOT depend on iced/nucleo/global-hotkey
+- `crates/heats-providers/src/bin/` — CLI client + source/action providers

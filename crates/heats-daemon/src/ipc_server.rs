@@ -7,7 +7,7 @@ use tokio::net::UnixListener;
 use tokio::sync::oneshot;
 
 use crate::app::{Message, ResponseSender};
-use crate::source::{DmenuItem, SourceItem};
+use heats_core::source::{DmenuItem, SourceItem};
 
 /// IPC context sent as the first line by the client
 #[derive(serde::Deserialize)]
@@ -26,7 +26,7 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
     iced::stream::channel(
         4,
         |mut sender: iced::futures::channel::mpsc::Sender<Message>| async move {
-            let sock_path = super::socket_path();
+            let sock_path = heats_core::ipc::socket_path();
 
             // Remove stale socket (in case daemon didn't clean up)
             let _ = std::fs::remove_file(&sock_path);

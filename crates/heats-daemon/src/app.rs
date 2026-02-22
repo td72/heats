@@ -6,12 +6,12 @@ use iced::{event, keyboard, Color, Element, Fill, Padding, Point, Size, Subscrip
 use tokio::sync::oneshot;
 
 use crate::command::{self, LoadedItem};
-use crate::config::{Config, WindowMode};
 use crate::hotkey::{self, HotkeyMessage};
-use crate::ipc;
+use crate::ipc_server;
 use crate::matcher::engine::Matcher;
-use crate::source::SourceItem;
 use crate::ui::{result_list, search_input, theme};
+use heats_core::config::{Config, WindowMode};
+use heats_core::source::SourceItem;
 
 pub struct State {
     config: Config,
@@ -75,9 +75,9 @@ impl State {
         hotkey_modes: Vec<(u32, String)>,
     ) -> (Self, Task<Message>) {
         let fixed_display = if config.window.display.is_empty() {
-            crate::platform::macos::focused_display_bounds()
+            heats_core::platform::macos::focused_display_bounds()
         } else {
-            crate::platform::macos::display_bounds_by_name(&config.window.display)
+            heats_core::platform::macos::display_bounds_by_name(&config.window.display)
         };
 
         tracing::info!(
@@ -244,7 +244,7 @@ impl State {
                 _ => Task::none(),
             },
             Message::ActivateWindow => {
-                crate::platform::macos::native_focus_heats_window();
+                heats_core::platform::macos::native_focus_heats_window();
                 if let Some(id) = self.window_id {
                     Task::batch([
                         window::gain_focus(id),
@@ -313,7 +313,7 @@ impl State {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
             hotkey::subscription(self.hotkey_modes.clone()).map(Message::Hotkey),
-            ipc::server::dmenu_subscription(),
+            ipc_server::dmenu_subscription(),
         ];
 
         // Normal mode needs close events to track window lifecycle
@@ -479,7 +479,7 @@ impl State {
     // -- Normal mode: open/close window each time --
 
     fn show_normal(&mut self, load_task: Task<Message>) -> Task<Message> {
-        let disp_bounds = crate::platform::macos::focused_display_bounds();
+        let disp_bounds = heats_core::platform::macos::focused_display_bounds();
         let pos = Self::center_on_display(
             &disp_bounds,
             self.config.window.width,
@@ -520,7 +520,7 @@ impl State {
 
         // Use native NSWindow API to position and show the window.
         // This bypasses winit's coordinate handling and avoids AeroSpace interference.
-        crate::platform::macos::native_show_window(
+        heats_core::platform::macos::native_show_window(
             &self.fixed_display,
             self.config.window.width as f64,
             self.config.window.height as f64,
@@ -536,7 +536,7 @@ impl State {
     fn hide_fixed(&self) -> Task<Message> {
         // Use native NSWindow.orderOut to truly hide the window.
         // Unlike moving off-screen, this is invisible to window managers.
-        crate::platform::macos::native_hide_window();
+        heats_core::platform::macos::native_hide_window();
         Task::none()
     }
 

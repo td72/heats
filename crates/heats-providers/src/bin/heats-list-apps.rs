@@ -1,5 +1,5 @@
-use heats::source::applications::scan_apps;
-use heats::source::DmenuItem;
+use heats_core::source::applications::scan_apps;
+use heats_core::source::DmenuItem;
 
 fn main() {
     let apps = scan_apps();

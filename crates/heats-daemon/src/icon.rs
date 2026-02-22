@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use icns::{IconFamily, IconType, PixelFormat};
 
-use crate::source::IconData;
+use heats_core::source::IconData;
 
 /// Load an app icon from a .app bundle as 32x32 RGBA pixel data.
 ///

@@ -1,7 +1,7 @@
 use std::process;
 
-use heats::ipc;
-use heats::ipc::client::IpcFormat;
+use heats_core::ipc;
+use heats_core::ipc::client::IpcFormat;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
