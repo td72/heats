@@ -1,0 +1,20 @@
+[package]
+name = "heats-providers"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "heats-list-apps"
+path = "src/bin/heats-list-apps.rs"
+
+[[bin]]
+name = "heats-list-windows"
+path = "src/bin/heats-list-windows.rs"
+
+[[bin]]
+name = "heats-focus-window"
+path = "src/bin/heats-focus-window.rs"
+
+[dependencies]
+heats-core = { path = "../heats-core" }
+serde_json = "1"

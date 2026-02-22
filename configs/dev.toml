@@ -1,0 +1,29 @@
+# Debug config for local development
+# Based on ~/.config/heats/config.toml
+# Source/action commands resolve to target/debug/ binaries automatically.
+
+[window]
+width = 600.0
+height = 400.0
+mode = "fixed"
+
+[provider.open-apps]
+source = ["heats-list-apps"]
+action = ["open", "-a"]
+field = "data.path"
+cache_interval = 3600
+
+[provider.focus-window]
+source = ["heats-list-windows"]
+action = ["heats-focus-window"]
+field = "data.pid"
+
+[[mode]]
+name = "launcher"
+hotkey = "Cmd+Semicolon"
+providers = ["open-apps"]
+
+[[mode]]
+name = "windows"
+hotkey = "Cmd+Quote"
+providers = ["focus-window"]

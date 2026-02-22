@@ -1,0 +1,18 @@
+[tools]
+prek = "latest"
+
+[tasks.dev]
+description = "Build debug and restart heatsd with dev config"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Stop existing heatsd
+pkill -f 'target/debug/heatsd' 2>/dev/null && sleep 0.5 || true
+
+# Build
+cargo build
+
+# Start with dev config
+RUST_LOG=heats=debug ./target/debug/heatsd --config configs/dev.toml
+"""
