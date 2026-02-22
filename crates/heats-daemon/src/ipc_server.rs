@@ -9,10 +9,6 @@ use tokio::sync::oneshot;
 use crate::app::{Message, ResponseSender};
 use heats_core::source::{DmenuItem, SourceItem};
 
-/// Index mapping from filtered display order to original raw_lines position.
-/// When JSONL lines fail to parse, the SourceItem list is shorter than raw_lines,
-/// so we need to track which raw_lines index each SourceItem came from.
-
 /// IPC context sent as the first line by the client
 #[derive(serde::Deserialize)]
 struct IpcContext {
@@ -127,45 +123,43 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                 );
 
                 // Convert to SourceItems based on format.
-                // index_map tracks: items[i] came from raw_lines[index_map[i]].
-                let (items, index_map): (Vec<SourceItem>, Vec<usize>) = if is_jsonl {
+                // Each item's `id` field stores its original raw_lines index.
+                let items: Vec<SourceItem> = if is_jsonl {
                     raw_lines
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, line)| {
                             match serde_json::from_str::<DmenuItem>(line) {
-                                Ok(di) => {
-                                    let si = SourceItem {
-                                        title: di.title.clone(),
-                                        subtitle: di.subtitle.clone(),
-                                        exec_path: di.get_field("data"),
-                                        source_name: "dmenu".to_string(),
-                                        icon: None,
-                                    };
-                                    Some((si, idx))
-                                }
+                                Ok(di) => Some(SourceItem {
+                                    id: Some(idx),
+                                    title: di.title.clone(),
+                                    subtitle: di.subtitle.clone(),
+                                    exec_path: di.get_field("data"),
+                                    source_name: "dmenu".to_string(),
+                                    icon: None,
+                                }),
                                 Err(e) => {
                                     tracing::debug!("Failed to parse JSONL line: {}", e);
                                     None
                                 }
                             }
                         })
-                        .unzip()
+                        .collect()
                 } else {
                     raw_lines
                         .iter()
                         .enumerate()
                         .map(|(idx, title)| {
-                            let si = SourceItem {
+                            SourceItem {
+                                id: Some(idx),
                                 title: title.clone(),
                                 subtitle: None,
                                 exec_path: String::new(),
                                 source_name: "dmenu".to_string(),
                                 icon: None,
-                            };
-                            (si, idx)
+                            }
                         })
-                        .unzip()
+                        .collect()
                 };
 
                 // Create a oneshot channel for the response (selected index)
@@ -184,18 +178,22 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                     continue;
                 }
 
-                // Wait for the app to send back a response (selected index),
+                // Wait for the app to send back a response (item ID = raw_lines index),
                 // then write the corresponding raw line to the client
                 let stream = reader.into_inner();
                 match response_rx.await {
-                    Ok(Some(selected_index)) => {
-                        // Map the selected_index (from filtered items) back to
-                        // the original raw_lines position
-                        let response = index_map
-                            .get(selected_index)
-                            .and_then(|&raw_idx| raw_lines.get(raw_idx))
-                            .cloned()
-                            .unwrap_or_default();
+                    Ok(Some(item_id)) => {
+                        let response = match raw_lines.get(item_id) {
+                            Some(line) => line.clone(),
+                            None => {
+                                tracing::warn!(
+                                    "IPC: item id {} out of range (raw_lines len={})",
+                                    item_id,
+                                    raw_lines.len()
+                                );
+                                String::new()
+                            }
+                        };
 
                         let mut writer = stream;
                         let payload = format!("{response}\n");

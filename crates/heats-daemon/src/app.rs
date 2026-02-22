@@ -36,7 +36,7 @@ pub struct State {
     /// Loaded items with action resolution metadata
     loaded_items: Vec<LoadedItem>,
 
-    /// Active dmenu session response channel (returns selected index)
+    /// Active dmenu session response channel (returns selected item's ID)
     dmenu_tx: Option<oneshot::Sender<Option<usize>>>,
     /// Whether current session is dmenu (external items) vs built-in
     is_dmenu_session: bool,
@@ -192,9 +192,9 @@ impl State {
                 Task::none()
             }
             Message::Execute => {
-                if self.results.get(self.selected).is_some() {
+                if let Some(item) = self.results.get(self.selected) {
                     if self.is_dmenu_session {
-                        self.send_dmenu_response(Some(self.selected));
+                        self.send_dmenu_response(item.id);
                     }
                 }
                 // Capture action info before hide() clears state
@@ -209,9 +209,9 @@ impl State {
             }
             Message::SelectAndExecute(index) => {
                 self.selected = index;
-                if self.results.get(index).is_some() {
+                if let Some(item) = self.results.get(index) {
                     if self.is_dmenu_session {
-                        self.send_dmenu_response(Some(index));
+                        self.send_dmenu_response(item.id);
                     }
                 }
                 let action = self.pending_action(index);

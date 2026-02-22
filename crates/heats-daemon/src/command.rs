@@ -47,6 +47,7 @@ pub async fn load_from_providers(
     while let Some(Ok((provider_name, items))) = set.join_next().await {
         for (dmenu_item, icon) in items {
             let source_item = SourceItem {
+                id: None,
                 title: dmenu_item.title.clone(),
                 subtitle: dmenu_item.subtitle.clone(),
                 exec_path: dmenu_item.get_field("data"),

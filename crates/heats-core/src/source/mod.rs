@@ -74,6 +74,8 @@ pub enum IconData {
 /// An item displayed in the fuzzy finder (daemon internal UI type)
 #[derive(Debug, Clone)]
 pub struct SourceItem {
+    /// Unique identifier within a session (e.g. original line index for dmenu items)
+    pub id: Option<usize>,
     /// Display title (e.g. app name)
     pub title: String,
     /// Optional subtitle (e.g. path)
