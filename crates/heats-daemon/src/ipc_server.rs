@@ -122,47 +122,48 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                     format
                 );
 
-                // Convert to SourceItems based on format
-                let (items, dmenu_items): (Vec<SourceItem>, Vec<Option<DmenuItem>>) = if is_jsonl {
+                // Convert to SourceItems based on format.
+                // Each item's `id` field stores its original raw_lines index.
+                let items: Vec<SourceItem> = if is_jsonl {
                     raw_lines
                         .iter()
-                        .filter_map(|line| {
+                        .enumerate()
+                        .filter_map(|(idx, line)| {
                             match serde_json::from_str::<DmenuItem>(line) {
-                                Ok(di) => {
-                                    let si = SourceItem {
-                                        title: di.title.clone(),
-                                        subtitle: di.subtitle.clone(),
-                                        exec_path: di.get_field("data"),
-                                        source_name: "dmenu".to_string(),
-                                        icon: None, // No icon loading for IPC items
-                                    };
-                                    Some((si, Some(di)))
-                                }
+                                Ok(di) => Some(SourceItem {
+                                    id: Some(idx),
+                                    title: di.title.clone(),
+                                    subtitle: di.subtitle.clone(),
+                                    exec_path: di.get_field("data"),
+                                    source_name: "dmenu".to_string(),
+                                    icon: None,
+                                }),
                                 Err(e) => {
                                     tracing::debug!("Failed to parse JSONL line: {}", e);
                                     None
                                 }
                             }
                         })
-                        .unzip()
+                        .collect()
                 } else {
                     raw_lines
                         .iter()
-                        .map(|title| {
-                            let si = SourceItem {
+                        .enumerate()
+                        .map(|(idx, title)| {
+                            SourceItem {
+                                id: Some(idx),
                                 title: title.clone(),
                                 subtitle: None,
                                 exec_path: String::new(),
                                 source_name: "dmenu".to_string(),
                                 icon: None,
-                            };
-                            (si, None)
+                            }
                         })
-                        .unzip()
+                        .collect()
                 };
 
-                // Create a oneshot channel for the response
-                let (response_tx, response_rx) = oneshot::channel::<Option<String>>();
+                // Create a oneshot channel for the response (selected index)
+                let (response_tx, response_rx) = oneshot::channel::<Option<usize>>();
 
                 // Wrap sender in Arc<Mutex<Option<...>>> so Message can be Clone
                 let wrapped_tx = ResponseSender(Arc::new(Mutex::new(Some(response_tx))));
@@ -177,21 +178,21 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                     continue;
                 }
 
-                // Wait for the app to send back a response, then write to the client
+                // Wait for the app to send back a response (item ID = raw_lines index),
+                // then write the corresponding raw line to the client
                 let stream = reader.into_inner();
                 match response_rx.await {
-                    Ok(Some(selected)) => {
-                        // For JSONL format, try to return the data field
-                        let response = if is_jsonl {
-                            // Find the DmenuItem whose title matches the selected
-                            dmenu_items
-                                .iter()
-                                .flatten()
-                                .find(|di| di.title == selected)
-                                .map(|di| di.get_field("data"))
-                                .unwrap_or(selected)
-                        } else {
-                            selected
+                    Ok(Some(item_id)) => {
+                        let response = match raw_lines.get(item_id) {
+                            Some(line) => line.clone(),
+                            None => {
+                                tracing::warn!(
+                                    "IPC: item id {} out of range (raw_lines len={})",
+                                    item_id,
+                                    raw_lines.len()
+                                );
+                                String::new()
+                            }
                         };
 
                         let mut writer = stream;

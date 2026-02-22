@@ -36,8 +36,8 @@ pub struct State {
     /// Loaded items with action resolution metadata
     loaded_items: Vec<LoadedItem>,
 
-    /// Active dmenu session response channel
-    dmenu_tx: Option<oneshot::Sender<Option<String>>>,
+    /// Active dmenu session response channel (returns selected item's ID)
+    dmenu_tx: Option<oneshot::Sender<Option<usize>>>,
     /// Whether current session is dmenu (external items) vs built-in
     is_dmenu_session: bool,
 
@@ -49,7 +49,7 @@ pub struct State {
 
 /// Wrapper to make oneshot::Sender cloneable for Message (taken once via take()).
 #[derive(Clone)]
-pub struct ResponseSender(pub Arc<Mutex<Option<oneshot::Sender<Option<String>>>>>);
+pub struct ResponseSender(pub Arc<Mutex<Option<oneshot::Sender<Option<usize>>>>>);
 
 impl std::fmt::Debug for ResponseSender {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -194,7 +194,7 @@ impl State {
             Message::Execute => {
                 if let Some(item) = self.results.get(self.selected) {
                     if self.is_dmenu_session {
-                        self.send_dmenu_response(Some(item.title.clone()));
+                        self.send_dmenu_response(item.id);
                     }
                 }
                 // Capture action info before hide() clears state
@@ -211,7 +211,7 @@ impl State {
                 self.selected = index;
                 if let Some(item) = self.results.get(index) {
                     if self.is_dmenu_session {
-                        self.send_dmenu_response(Some(item.title.clone()));
+                        self.send_dmenu_response(item.id);
                     }
                 }
                 let action = self.pending_action(index);
@@ -441,7 +441,7 @@ impl State {
     fn start_dmenu_session(
         &mut self,
         items: Vec<SourceItem>,
-        tx: Option<oneshot::Sender<Option<String>>>,
+        tx: Option<oneshot::Sender<Option<usize>>>,
     ) {
         self.dmenu_tx = tx;
         self.is_dmenu_session = true;
@@ -465,7 +465,7 @@ impl State {
         }
     }
 
-    fn send_dmenu_response(&mut self, response: Option<String>) {
+    fn send_dmenu_response(&mut self, response: Option<usize>) {
         if let Some(tx) = self.dmenu_tx.take() {
             let _ = tx.send(response);
         }
