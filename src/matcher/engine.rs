@@ -11,6 +11,12 @@ pub struct Matcher {
     last_query: String,
 }
 
+impl Default for Matcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Matcher {
     pub fn new() -> Self {
         let nucleo = Nucleo::new(

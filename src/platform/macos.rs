@@ -117,7 +117,7 @@ pub fn focused_display_bounds() -> (f64, f64, f64, f64) {
 unsafe fn screen_display_id(screen: *mut Object) -> Option<u32> {
     let desc: *mut Object = msg_send![screen, deviceDescription];
     let key: *mut Object =
-        msg_send![class!(NSString), stringWithUTF8String: b"NSScreenNumber\0".as_ptr()];
+        msg_send![class!(NSString), stringWithUTF8String: c"NSScreenNumber".as_ptr()];
     let screen_number: *mut Object = msg_send![desc, objectForKey: key];
     if screen_number.is_null() {
         None
@@ -336,6 +336,7 @@ fn fallback_main_display() -> (f64, f64, f64, f64) {
     (b.origin.x, b.origin.y, b.size.width, b.size.height)
 }
 
+#[allow(dead_code)]
 fn mouse_position() -> (f64, f64) {
     let source = match core_graphics::event_source::CGEventSource::new(
         core_graphics::event_source::CGEventSourceStateID::CombinedSessionState,

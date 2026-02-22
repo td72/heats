@@ -8,8 +8,9 @@ use heats::config::{self, Config};
 use heats::hotkey;
 use heats::ipc;
 
-static BOOT_PARAMS: Mutex<Option<(Config, GlobalHotKeyManager, Vec<(u32, String)>)>> =
-    Mutex::new(None);
+type BootParams = (Config, GlobalHotKeyManager, Vec<(u32, String)>);
+
+static BOOT_PARAMS: Mutex<Option<BootParams>> = Mutex::new(None);
 
 fn boot() -> (State, iced::Task<app::Message>) {
     let params = BOOT_PARAMS

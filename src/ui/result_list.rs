@@ -31,16 +31,11 @@ pub fn view<'a>(
     let max_visible = visible_count(window_height);
 
     // Calculate visible window: keep selected item in view
-    let start = if selected_index + 1 >= max_visible {
-        selected_index + 1 - max_visible
-    } else {
-        0
-    };
+    let start = (selected_index + 1).saturating_sub(max_visible);
     let end = (start + max_visible).min(results.len());
 
     let mut rows = Column::new().spacing(2);
-    for i in start..end {
-        let item = &results[i];
+    for (i, item) in results.iter().enumerate().take(end).skip(start) {
         let is_selected = i == selected_index;
         let style = if is_selected {
             theme::result_row_selected as fn(&iced::Theme) -> container::Style

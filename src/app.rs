@@ -135,7 +135,6 @@ impl State {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        tracing::debug!("update: {:?}, visible={}, window_id={:?}", message, self.visible, self.window_id);
         match message {
             Message::WindowOpened(id) => {
                 tracing::debug!("WindowOpened: id={:?}, is_dmenu={}", id, self.is_dmenu_session);
