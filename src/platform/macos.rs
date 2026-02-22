@@ -23,6 +23,15 @@ pub fn ensure_screen_capture_access() {
     }
 }
 
+/// Force-activate this application, bringing it to the foreground.
+/// Used after subprocess spawning which may steal macOS app activation.
+pub fn activate_app() {
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, activateIgnoringOtherApps: true];
+    }
+}
+
 /// Open a macOS application by its path using the `open` command
 pub fn open_application(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Command::new("open").arg("-a").arg(path).spawn()?;
@@ -293,6 +302,21 @@ pub fn native_show_window(display: &(f64, f64, f64, f64), win_w: f64, win_h: f64
             let _: () = msg_send![window, makeKeyAndOrderFront: std::ptr::null::<Object>()];
         } else {
             tracing::warn!("native_show_window: Heats window not found");
+        }
+    }
+}
+
+/// Force the Heats window to become key window and bring to front.
+/// This ensures macOS routes keyboard events to the window.
+pub fn native_focus_heats_window() {
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, activateIgnoringOtherApps: true];
+        if let Some(window) = find_heats_window() {
+            tracing::debug!("native_focus_heats_window: found window, calling makeKeyAndOrderFront");
+            let _: () = msg_send![window, makeKeyAndOrderFront: std::ptr::null::<Object>()];
+        } else {
+            tracing::warn!("native_focus_heats_window: Heats window NOT found");
         }
     }
 }

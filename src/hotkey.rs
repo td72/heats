@@ -4,76 +4,79 @@ use iced::futures::SinkExt;
 use iced::stream::channel;
 use iced::Subscription;
 
-use crate::config::HotkeyConfig;
+use crate::config::ModeConfig;
 
 /// Message emitted by the hotkey subscription
 #[derive(Debug, Clone)]
-pub enum HotkeyMessage {
-    TogglePressed,
-    WindowsPressed,
+pub struct HotkeyMessage {
+    pub mode_name: String,
 }
 
 /// Initialize the global hotkey manager on the main thread.
-/// Returns the manager (must be kept alive!) and both registered hotkeys.
-pub fn init_manager(config: &HotkeyConfig) -> (GlobalHotKeyManager, HotKey, HotKey) {
+/// Returns the manager (must be kept alive!) and a mapping of hotkey_id → mode_name.
+pub fn init_manager(modes: &[ModeConfig]) -> (GlobalHotKeyManager, Vec<(u32, String)>) {
     let manager = GlobalHotKeyManager::new().expect("Failed to create GlobalHotKeyManager");
+    let mut mappings = Vec::new();
 
-    // Primary hotkey (toggle: apps + windows)
-    let modifiers = parse_modifiers(&config.modifiers);
-    let code = parse_code(&config.key);
-    let primary = HotKey::new(Some(modifiers), code);
-    manager
-        .register(primary)
-        .expect("Failed to register primary hotkey");
-    tracing::info!(
-        "Registered primary hotkey: {}+{}",
-        config.modifiers,
-        config.key
-    );
+    for mode in modes {
+        let (mods, code) = parse_hotkey_str(&mode.hotkey);
+        let hotkey = HotKey::new(Some(mods), code);
+        manager
+            .register(hotkey)
+            .unwrap_or_else(|e| panic!("Failed to register hotkey for mode '{}': {e}", mode.name));
+        tracing::info!(
+            "Registered hotkey '{}' for mode '{}'",
+            mode.hotkey,
+            mode.name
+        );
+        mappings.push((hotkey.id(), mode.name.clone()));
+    }
 
-    // Secondary hotkey (windows only)
-    let win_modifiers = parse_modifiers(&config.windows_modifiers);
-    let win_code = parse_code(&config.windows_key);
-    let secondary = HotKey::new(Some(win_modifiers), win_code);
-    manager
-        .register(secondary)
-        .expect("Failed to register windows hotkey");
-    tracing::info!(
-        "Registered windows hotkey: {}+{}",
-        config.windows_modifiers,
-        config.windows_key
-    );
-
-    (manager, primary, secondary)
+    (manager, mappings)
 }
 
 /// Create an iced Subscription that listens for global hotkey events
-pub fn subscription(primary_id: u32, secondary_id: u32) -> Subscription<HotkeyMessage> {
-    Subscription::run_with((primary_id, secondary_id), hotkey_stream)
+pub fn subscription(mappings: Vec<(u32, String)>) -> Subscription<HotkeyMessage> {
+    Subscription::run_with(mappings, hotkey_stream)
 }
 
-fn hotkey_stream(ids: &(u32, u32)) -> impl iced::futures::Stream<Item = HotkeyMessage> {
-    let (primary_id, secondary_id) = *ids;
-    channel(32, move |mut sender: iced::futures::channel::mpsc::Sender<HotkeyMessage>| async move {
-        let receiver = GlobalHotKeyEvent::receiver();
-        loop {
-            if let Ok(event) = receiver.try_recv() {
-                if event.state == HotKeyState::Pressed {
-                    if event.id == primary_id {
-                        let _ = sender.send(HotkeyMessage::TogglePressed).await;
-                    } else if event.id == secondary_id {
-                        let _ = sender.send(HotkeyMessage::WindowsPressed).await;
+#[allow(clippy::ptr_arg)]
+fn hotkey_stream(mappings: &Vec<(u32, String)>) -> impl iced::futures::Stream<Item = HotkeyMessage> {
+    let mappings = mappings.clone();
+    channel(
+        32,
+        move |mut sender: iced::futures::channel::mpsc::Sender<HotkeyMessage>| async move {
+            let receiver = GlobalHotKeyEvent::receiver();
+            loop {
+                if let Ok(event) = receiver.try_recv() {
+                    if event.state == HotKeyState::Pressed {
+                        for (id, mode_name) in &mappings {
+                            if event.id == *id {
+                                let _ = sender
+                                    .send(HotkeyMessage {
+                                        mode_name: mode_name.clone(),
+                                    })
+                                    .await;
+                                break;
+                            }
+                        }
                     }
                 }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
+        },
+    )
 }
 
-fn parse_modifiers(s: &str) -> Modifiers {
+/// Parse a hotkey string like "Cmd+Semicolon" into (Modifiers, Code)
+fn parse_hotkey_str(s: &str) -> (Modifiers, Code) {
+    let parts: Vec<&str> = s.split('+').collect();
+    // Last part is the key, everything before is modifiers
+    let key_str = parts.last().expect("Empty hotkey string");
+    let mod_parts = &parts[..parts.len() - 1];
+
     let mut mods = Modifiers::empty();
-    for part in s.split('+') {
+    for part in mod_parts {
         match part.trim().to_lowercase().as_str() {
             "cmd" | "super" | "command" | "meta" => mods |= Modifiers::SUPER,
             "ctrl" | "control" => mods |= Modifiers::CONTROL,
@@ -82,7 +85,9 @@ fn parse_modifiers(s: &str) -> Modifiers {
             _ => tracing::warn!("Unknown modifier: {}", part),
         }
     }
-    mods
+
+    let code = parse_code(key_str.trim());
+    (mods, code)
 }
 
 fn parse_code(s: &str) -> Code {

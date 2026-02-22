@@ -3,10 +3,20 @@ use std::io::{self, BufRead};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
+/// IPC format for communication with daemon
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IpcFormat {
+    Text,
+    Jsonl,
+}
+
 /// Read items from stdin, send them to the daemon, and return the selected item.
 /// Returns `Ok(Some(selected))` if user selected, `Ok(None)` if cancelled,
 /// and `Err` if the daemon is unreachable or an I/O error occurs.
-pub async fn send_and_receive(items: Vec<String>) -> io::Result<Option<String>> {
+pub async fn send_and_receive(
+    items: Vec<String>,
+    format: IpcFormat,
+) -> io::Result<Option<String>> {
     let sock_path = super::socket_path();
 
     let stream = UnixStream::connect(&sock_path).await.map_err(|e| {
@@ -17,6 +27,14 @@ pub async fn send_and_receive(items: Vec<String>) -> io::Result<Option<String>> 
     })?;
 
     let (reader, mut writer) = stream.into_split();
+
+    // Send context line
+    let context = match format {
+        IpcFormat::Text => r#"{"format":"text"}"#,
+        IpcFormat::Jsonl => r#"{"format":"jsonl"}"#,
+    };
+    writer.write_all(context.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
 
     // Send items as newline-delimited text
     for item in &items {

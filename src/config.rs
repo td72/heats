@@ -1,20 +1,37 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub hotkey: HotkeyConfig,
     pub window: WindowConfig,
+    pub mode: Vec<ModeConfig>,
+    pub provider: HashMap<String, ProviderConfig>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct HotkeyConfig {
-    pub modifiers: String,
-    pub key: String,
-    pub windows_modifiers: String,
-    pub windows_key: String,
+/// A mode: hotkey → providers mapping
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModeConfig {
+    pub name: String,
+    pub hotkey: String,
+    pub providers: Vec<String>,
+}
+
+/// A provider: source command + action command bundled together
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderConfig {
+    /// Source command + arguments (stdout に JSONL を出力)
+    pub source: Vec<String>,
+    /// Action command + arguments (選択時に field 値を末尾に付与して実行)
+    pub action: Vec<String>,
+    /// Which JSONL field to pass to the action (default: "data")
+    #[serde(default = "default_field")]
+    pub field: String,
+}
+
+fn default_field() -> String {
+    "data".to_string()
 }
 
 /// Window management mode
@@ -41,19 +58,37 @@ pub struct WindowConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            hotkey: HotkeyConfig::default(),
             window: WindowConfig::default(),
-        }
-    }
-}
-
-impl Default for HotkeyConfig {
-    fn default() -> Self {
-        Self {
-            modifiers: "Cmd".to_string(),
-            key: "Semicolon".to_string(),
-            windows_modifiers: "Cmd".to_string(),
-            windows_key: "Quote".to_string(),
+            mode: vec![
+                ModeConfig {
+                    name: "launcher".to_string(),
+                    hotkey: "Cmd+Semicolon".to_string(),
+                    providers: vec!["open-apps".to_string(), "focus-window".to_string()],
+                },
+                ModeConfig {
+                    name: "windows".to_string(),
+                    hotkey: "Cmd+Quote".to_string(),
+                    providers: vec!["focus-window".to_string()],
+                },
+            ],
+            provider: HashMap::from([
+                (
+                    "open-apps".to_string(),
+                    ProviderConfig {
+                        source: vec!["heats-list-apps".to_string()],
+                        action: vec!["open".to_string(), "-a".to_string()],
+                        field: "data.path".to_string(),
+                    },
+                ),
+                (
+                    "focus-window".to_string(),
+                    ProviderConfig {
+                        source: vec!["heats-list-windows".to_string()],
+                        action: vec!["heats-focus-window".to_string()],
+                        field: "data.pid".to_string(),
+                    },
+                ),
+            ]),
         }
     }
 }

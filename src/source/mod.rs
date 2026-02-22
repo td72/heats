@@ -3,10 +3,62 @@ pub mod windows;
 
 use std::sync::Arc;
 
-use applications::ApplicationsSource;
-use windows::WindowsSource;
+/// JSONL protocol type: the schema for source command → daemon communication
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DmenuItem {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
 
-/// Icon data for a source item
+impl DmenuItem {
+    /// Get a field value by dot-separated path (e.g. "title", "data.pid")
+    pub fn get_field(&self, field: &str) -> String {
+        match field {
+            "title" => self.title.clone(),
+            "subtitle" => self.subtitle.clone().unwrap_or_default(),
+            "icon_path" => self.icon_path.clone().unwrap_or_default(),
+            _ if field.starts_with("data") => {
+                let data = match &self.data {
+                    Some(v) => v,
+                    None => return self.title.clone(),
+                };
+                if field == "data" {
+                    value_to_string(data)
+                } else if let Some(rest) = field.strip_prefix("data.") {
+                    let mut current = data;
+                    for key in rest.split('.') {
+                        match current.get(key) {
+                            Some(v) => current = v,
+                            None => return String::new(),
+                        }
+                    }
+                    value_to_string(current)
+                } else {
+                    self.title.clone()
+                }
+            }
+            _ => self.title.clone(),
+        }
+    }
+}
+
+/// Convert a JSON value to a plain string for action arguments
+fn value_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// Icon data for a source item (daemon internal UI type)
 #[derive(Debug, Clone)]
 pub enum IconData {
     /// Pre-loaded RGBA pixel data (Arc to avoid expensive clones)
@@ -19,7 +71,7 @@ pub enum IconData {
     Text(String),
 }
 
-/// An item returned by a Source
+/// An item displayed in the fuzzy finder (daemon internal UI type)
 #[derive(Debug, Clone)]
 pub struct SourceItem {
     /// Display title (e.g. app name)
@@ -32,85 +84,4 @@ pub struct SourceItem {
     pub source_name: String,
     /// Optional icon for display
     pub icon: Option<IconData>,
-}
-
-/// Trait for item sources (extensibility point)
-pub trait Source: Send + Sync {
-    /// Name of this source
-    fn name(&self) -> &str;
-
-    /// Optional prefix to activate this source (e.g. "=" for calc, ">" for shell)
-    fn prefix(&self) -> Option<&str> {
-        None
-    }
-
-    /// Load all items from this source
-    fn load(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<SourceItem>> + Send>>;
-
-    /// Execute the given item
-    fn execute(&self, item: &SourceItem) -> Result<(), Box<dyn std::error::Error>>;
-}
-
-type SourceFactory = fn() -> Box<dyn Source>;
-
-/// Registry holding all active sources (factory-based)
-pub struct SourceRegistry {
-    factories: Vec<(&'static str, SourceFactory)>,
-}
-
-impl Default for SourceRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SourceRegistry {
-    /// Create a registry with all sources registered
-    pub fn new() -> Self {
-        let mut reg = Self {
-            factories: Vec::new(),
-        };
-        reg.register("applications", || Box::new(ApplicationsSource::new()));
-        reg.register("windows", || Box::new(WindowsSource::new()));
-        reg
-    }
-
-    fn register(&mut self, name: &'static str, factory: SourceFactory) {
-        self.factories.push((name, factory));
-    }
-
-    /// Load items from sources. Pass `None` for all sources, or `Some(names)` to filter.
-    pub async fn load_items(filter: Option<Vec<String>>) -> Vec<SourceItem> {
-        let registry = Self::new();
-        let sources: Vec<Box<dyn Source>> = match &filter {
-            Some(names) => registry
-                .factories
-                .iter()
-                .filter(|(n, _)| names.iter().any(|f| f == n))
-                .map(|(_, f)| f())
-                .collect(),
-            None => registry.factories.iter().map(|(_, f)| f()).collect(),
-        };
-
-        let mut set = tokio::task::JoinSet::new();
-        for source in sources {
-            set.spawn(async move { source.load().await });
-        }
-
-        let mut items = Vec::new();
-        while let Some(Ok(result)) = set.join_next().await {
-            items.extend(result);
-        }
-        items
-    }
-
-    /// Find the source that owns an item and execute it
-    pub fn execute(&self, item: &SourceItem) -> Result<(), Box<dyn std::error::Error>> {
-        for (name, factory) in &self.factories {
-            if *name == item.source_name {
-                return factory().execute(item);
-            }
-        }
-        Err(format!("No source found for: {}", item.source_name).into())
-    }
 }

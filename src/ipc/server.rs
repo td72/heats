@@ -7,6 +7,13 @@ use tokio::net::UnixListener;
 use tokio::sync::oneshot;
 
 use crate::app::{Message, ResponseSender};
+use crate::source::{DmenuItem, SourceItem};
+
+/// IPC context sent as the first line by the client
+#[derive(serde::Deserialize)]
+struct IpcContext {
+    format: String,
+}
 
 /// Create an iced Subscription that listens on the Unix domain socket.
 /// Accepts one connection at a time: reads line-delimited items, then sends
@@ -49,9 +56,44 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                 tracing::debug!("IPC client connected");
 
                 let mut reader = BufReader::new(stream);
-                let mut items = Vec::new();
 
-                // Read lines until EOF
+                // Read the first line as context
+                let mut first_line = String::new();
+                match reader.read_line(&mut first_line).await {
+                    Ok(0) => {
+                        tracing::debug!("IPC client disconnected immediately");
+                        continue;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("IPC read error on context line: {}", e);
+                        continue;
+                    }
+                }
+
+                let first_line = first_line.trim().to_string();
+
+                // Try to parse as IPC context
+                let (format, remaining_first_line) =
+                    match serde_json::from_str::<IpcContext>(&first_line) {
+                        Ok(ctx) => (ctx.format, None),
+                        Err(_) => {
+                            // Not a context line — treat as legacy text format
+                            // The first line is actually an item
+                            ("text".to_string(), Some(first_line))
+                        }
+                    };
+
+                let is_jsonl = format == "jsonl";
+
+                // Read remaining lines
+                let mut raw_lines = Vec::new();
+                if let Some(line) = remaining_first_line {
+                    if !line.is_empty() {
+                        raw_lines.push(line);
+                    }
+                }
+
                 loop {
                     let mut line = String::new();
                     match reader.read_line(&mut line).await {
@@ -59,7 +101,7 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                         Ok(_) => {
                             let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
                             if !trimmed.is_empty() {
-                                items.push(trimmed.to_string());
+                                raw_lines.push(trimmed.to_string());
                             }
                         }
                         Err(e) => {
@@ -69,12 +111,55 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                     }
                 }
 
-                if items.is_empty() {
+                if raw_lines.is_empty() {
                     tracing::debug!("IPC client sent no items, ignoring");
                     continue;
                 }
 
-                tracing::info!("IPC received {} items", items.len());
+                tracing::info!(
+                    "IPC received {} items (format: {})",
+                    raw_lines.len(),
+                    format
+                );
+
+                // Convert to SourceItems based on format
+                let (items, dmenu_items): (Vec<SourceItem>, Vec<Option<DmenuItem>>) = if is_jsonl {
+                    raw_lines
+                        .iter()
+                        .filter_map(|line| {
+                            match serde_json::from_str::<DmenuItem>(line) {
+                                Ok(di) => {
+                                    let si = SourceItem {
+                                        title: di.title.clone(),
+                                        subtitle: di.subtitle.clone(),
+                                        exec_path: di.get_field("data"),
+                                        source_name: "dmenu".to_string(),
+                                        icon: None, // No icon loading for IPC items
+                                    };
+                                    Some((si, Some(di)))
+                                }
+                                Err(e) => {
+                                    tracing::debug!("Failed to parse JSONL line: {}", e);
+                                    None
+                                }
+                            }
+                        })
+                        .unzip()
+                } else {
+                    raw_lines
+                        .iter()
+                        .map(|title| {
+                            let si = SourceItem {
+                                title: title.clone(),
+                                subtitle: None,
+                                exec_path: String::new(),
+                                source_name: "dmenu".to_string(),
+                                icon: None,
+                            };
+                            (si, None)
+                        })
+                        .unzip()
+                };
 
                 // Create a oneshot channel for the response
                 let (response_tx, response_rx) = oneshot::channel::<Option<String>>();
@@ -96,8 +181,21 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                 let stream = reader.into_inner();
                 match response_rx.await {
                     Ok(Some(selected)) => {
+                        // For JSONL format, try to return the data field
+                        let response = if is_jsonl {
+                            // Find the DmenuItem whose title matches the selected
+                            dmenu_items
+                                .iter()
+                                .flatten()
+                                .find(|di| di.title == selected)
+                                .map(|di| di.get_field("data"))
+                                .unwrap_or(selected)
+                        } else {
+                            selected
+                        };
+
                         let mut writer = stream;
-                        let payload = format!("{selected}\n");
+                        let payload = format!("{response}\n");
                         if let Err(e) = writer.write_all(payload.as_bytes()).await {
                             tracing::error!("IPC write error: {}", e);
                         }

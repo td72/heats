@@ -5,16 +5,16 @@ use iced::window;
 use iced::{event, keyboard, Color, Element, Fill, Padding, Point, Size, Subscription, Task, Theme};
 use tokio::sync::oneshot;
 
+use crate::command::{self, LoadedItem};
 use crate::config::{Config, WindowMode};
 use crate::hotkey::{self, HotkeyMessage};
 use crate::ipc;
 use crate::matcher::engine::Matcher;
-use crate::source::{SourceItem, SourceRegistry};
+use crate::source::SourceItem;
 use crate::ui::{result_list, search_input, theme};
 
 pub struct State {
     config: Config,
-    sources: SourceRegistry,
     matcher: Matcher,
     all_items: Vec<SourceItem>,
     results: Vec<SourceItem>,
@@ -29,8 +29,10 @@ pub struct State {
     fixed_display: (f64, f64, f64, f64),
 
     _hotkey_manager: global_hotkey::GlobalHotKeyManager,
-    hotkey_id: u32,
-    hotkey_id_windows: u32,
+    hotkey_modes: Vec<(u32, String)>,
+
+    /// Loaded items with action resolution metadata
+    loaded_items: Vec<LoadedItem>,
 
     /// Active dmenu session response channel
     dmenu_tx: Option<oneshot::Sender<Option<String>>>,
@@ -55,12 +57,13 @@ pub enum Message {
     QueryChanged(String),
     Execute,
     SelectAndExecute(usize),
-    ItemsLoaded(Vec<SourceItem>),
+    ItemsLoaded(Vec<LoadedItem>),
     MatcherTick,
     KeyEvent(keyboard::Event),
     Hotkey(HotkeyMessage),
+    ActivateWindow,
     DmenuSession {
-        items: Vec<String>,
+        items: Vec<SourceItem>,
         response_tx: ResponseSender,
     },
 }
@@ -69,11 +72,8 @@ impl State {
     pub fn new(
         config: Config,
         manager: global_hotkey::GlobalHotKeyManager,
-        hotkey_id: u32,
-        hotkey_id_windows: u32,
+        hotkey_modes: Vec<(u32, String)>,
     ) -> (Self, Task<Message>) {
-        let sources = SourceRegistry::new();
-
         let fixed_display = if config.window.display.is_empty() {
             crate::platform::macos::focused_display_bounds()
         } else {
@@ -112,7 +112,6 @@ impl State {
 
         let state = Self {
             config,
-            sources,
             matcher: Matcher::new(),
             all_items: Vec::new(),
             results: Vec::new(),
@@ -122,14 +121,13 @@ impl State {
             visible: false,
             fixed_display,
             _hotkey_manager: manager,
-            hotkey_id,
-            hotkey_id_windows,
+            hotkey_modes,
+            loaded_items: Vec::new(),
             dmenu_tx: None,
             is_dmenu_session: false,
         };
 
-        let load_task = Task::perform(SourceRegistry::load_items(None), Message::ItemsLoaded);
-        (state, Task::batch([boot_task, load_task]))
+        (state, boot_task)
     }
 
     pub fn title(&self, _window: window::Id) -> String {
@@ -137,14 +135,21 @@ impl State {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        tracing::debug!("update: {:?}, visible={}, window_id={:?}", message, self.visible, self.window_id);
         match message {
             Message::WindowOpened(id) => {
                 tracing::debug!("WindowOpened: id={:?}, is_dmenu={}", id, self.is_dmenu_session);
                 self.window_id = Some(id);
-                // Normal mode: window just opened, focus the input
+                // Delay native focus to next run loop iteration so macOS has
+                // time to fully realize the window before we activate it
+                let activate = Task::perform(
+                    async { tokio::time::sleep(std::time::Duration::from_millis(50)).await },
+                    |_| Message::ActivateWindow,
+                );
                 Task::batch([
                     window::gain_focus(id),
                     iced::widget::operation::focus(search_input::SEARCH_INPUT_ID),
+                    activate,
                 ])
             }
             Message::WindowClosed(id) => {
@@ -173,8 +178,8 @@ impl State {
                     if self.is_dmenu_session {
                         // Dmenu mode: send selected title back to client
                         self.send_dmenu_response(Some(item.title.clone()));
-                    } else if let Err(e) = self.sources.execute(item) {
-                        tracing::error!("Failed to execute: {}", e);
+                    } else {
+                        self.execute_selected(self.selected);
                     }
                 }
                 self.hide()
@@ -184,20 +189,23 @@ impl State {
                 if let Some(item) = self.results.get(self.selected) {
                     if self.is_dmenu_session {
                         self.send_dmenu_response(Some(item.title.clone()));
-                    } else if let Err(e) = self.sources.execute(item) {
-                        tracing::error!("Failed to execute: {}", e);
+                    } else {
+                        self.execute_selected(self.selected);
                     }
                 }
                 self.hide()
             }
-            Message::ItemsLoaded(items) => {
-                // Ignore app items while a dmenu session is active
+            Message::ItemsLoaded(loaded_items) => {
+                // Ignore items while a dmenu session is active
                 if self.is_dmenu_session {
                     tracing::debug!("ItemsLoaded ignored (dmenu session active)");
                     return Task::none();
                 }
-                self.all_items = items;
+                self.all_items = loaded_items.iter().map(|li| li.item.clone()).collect();
+                self.loaded_items = loaded_items;
                 self.matcher.set_items(self.all_items.clone());
+                self.results = self.all_items.clone();
+                // No focus call here — WindowOpened already handled focus
                 Task::none()
             }
             Message::MatcherTick => {
@@ -236,28 +244,28 @@ impl State {
                 }
                 _ => Task::none(),
             },
-            Message::Hotkey(HotkeyMessage::TogglePressed) => {
-                if self.visible {
-                    self.hide()
+            Message::ActivateWindow => {
+                crate::platform::macos::native_focus_heats_window();
+                if let Some(id) = self.window_id {
+                    Task::batch([
+                        window::gain_focus(id),
+                        iced::widget::operation::focus(search_input::SEARCH_INPUT_ID),
+                    ])
                 } else {
-                    // If a dmenu session is active, cancel it before showing app launcher
-                    if self.is_dmenu_session {
-                        self.cancel_dmenu_session();
-                        self.reset_state();
-                    }
-                    self.show()
+                    Task::none()
                 }
             }
-            Message::Hotkey(HotkeyMessage::WindowsPressed) => {
-                tracing::debug!("WindowsPressed: visible={}", self.visible);
+            Message::Hotkey(hotkey_msg) => {
+                let mode_name = hotkey_msg.mode_name;
                 if self.visible {
                     self.hide()
                 } else {
+                    // If a dmenu session is active, cancel it before showing
                     if self.is_dmenu_session {
                         self.cancel_dmenu_session();
                         self.reset_state();
                     }
-                    self.show_windows()
+                    self.show_mode(&mode_name)
                 }
             }
             Message::DmenuSession { items, response_tx } => {
@@ -305,7 +313,7 @@ impl State {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
-            hotkey::subscription(self.hotkey_id, self.hotkey_id_windows).map(Message::Hotkey),
+            hotkey::subscription(self.hotkey_modes.clone()).map(Message::Hotkey),
             ipc::server::dmenu_subscription(),
         ];
 
@@ -356,29 +364,43 @@ impl State {
         }
     }
 
+    // ---- Action execution ----
+
+    fn execute_selected(&self, selected_index: usize) {
+        let selected_item = match self.results.get(selected_index) {
+            Some(item) => item,
+            None => return,
+        };
+
+        // Find the LoadedItem matching this result
+        let loaded = self.loaded_items.iter().find(|li| {
+            li.item.title == selected_item.title
+                && li.item.source_name == selected_item.source_name
+                && li.item.exec_path == selected_item.exec_path
+        });
+
+        if let Some(loaded) = loaded {
+            if let Some(provider) = self.config.provider.get(&loaded.provider_name) {
+                command::execute_action(provider, &loaded.dmenu_item);
+            } else {
+                tracing::warn!("No provider configured for '{}'", loaded.provider_name);
+            }
+        } else {
+            tracing::warn!("Could not find LoadedItem for selected result");
+        }
+    }
+
     // ---- Dmenu ----
 
     fn start_dmenu_session(
         &mut self,
-        items: Vec<String>,
+        items: Vec<SourceItem>,
         tx: Option<oneshot::Sender<Option<String>>>,
     ) {
         self.dmenu_tx = tx;
         self.is_dmenu_session = true;
 
-        // Convert strings to SourceItems for the matcher
-        let source_items: Vec<SourceItem> = items
-            .into_iter()
-            .map(|title| SourceItem {
-                title,
-                subtitle: None,
-                exec_path: String::new(),
-                source_name: "dmenu".to_string(),
-                icon: None,
-            })
-            .collect();
-
-        self.all_items = source_items;
+        self.all_items = items;
         self.results = self.all_items.clone();
         self.matcher.set_items(self.all_items.clone());
     }
@@ -413,20 +435,27 @@ impl State {
 
     // ---- Show / Hide ----
 
-    fn show(&mut self) -> Task<Message> {
-        self.visible = true;
-        let load_task = Task::perform(SourceRegistry::load_items(None), Message::ItemsLoaded);
+    fn show_mode(&mut self, mode_name: &str) -> Task<Message> {
+        // Look up mode config to get provider list
+        let provider_names: Vec<String> = self
+            .config
+            .mode
+            .iter()
+            .find(|m| m.name == mode_name)
+            .map(|m| m.providers.clone())
+            .unwrap_or_default();
 
-        match self.config.window.mode {
-            WindowMode::Fixed => self.show_fixed(load_task),
-            WindowMode::Normal => self.show_normal(load_task),
+        if provider_names.is_empty() {
+            tracing::warn!("No providers configured for mode '{}'", mode_name);
+            return Task::none();
         }
-    }
 
-    fn show_windows(&mut self) -> Task<Message> {
+        // Open window immediately (so macOS grants focus while user interaction is fresh),
+        // then load items in parallel
         self.visible = true;
+        let providers = self.config.provider.clone();
         let load_task = Task::perform(
-            SourceRegistry::load_items(Some(vec!["windows".into()])),
+            async move { command::load_from_providers(&provider_names, &providers).await },
             Message::ItemsLoaded,
         );
 
@@ -529,7 +558,7 @@ impl State {
         self.query.clear();
         self.selected = 0;
         self.results.clear();
+        self.loaded_items.clear();
         self.matcher.update_query("");
     }
-
 }

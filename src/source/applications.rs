@@ -1,10 +1,4 @@
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
-
-use crate::icon;
-use crate::platform;
-use crate::source::{Source, SourceItem};
 
 /// Directories to scan for macOS applications
 const APP_DIRS: &[&str] = &[
@@ -14,59 +8,40 @@ const APP_DIRS: &[&str] = &[
     "/System/Applications/Utilities",
 ];
 
-/// Source that discovers macOS .app bundles
-pub struct ApplicationsSource;
-
-impl ApplicationsSource {
-    pub fn new() -> Self {
-        Self
-    }
-
-    fn scan_apps() -> Vec<SourceItem> {
-        let mut items = Vec::new();
-        for dir in APP_DIRS {
-            let path = PathBuf::from(dir);
-            if !path.exists() {
-                continue;
-            }
-            let entries = match std::fs::read_dir(&path) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "app") {
-                    let name = path
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    let app_icon = icon::load_app_icon(&path);
-                    items.push(SourceItem {
-                        title: name,
-                        subtitle: Some(path.to_string_lossy().to_string()),
-                        exec_path: path.to_string_lossy().to_string(),
-                        source_name: "applications".to_string(),
-                        icon: app_icon,
-                    });
-                }
-            }
-        }
-        items.sort_by(|a, b| a.title.cmp(&b.title));
-        items
-    }
+/// A discovered application entry (no icon loading)
+pub struct AppEntry {
+    pub name: String,
+    pub path: String,
 }
 
-impl Source for ApplicationsSource {
-    fn name(&self) -> &str {
-        "applications"
+/// Scan standard macOS directories for .app bundles.
+/// Returns a sorted list of AppEntry without loading icons.
+pub fn scan_apps() -> Vec<AppEntry> {
+    let mut items = Vec::new();
+    for dir in APP_DIRS {
+        let path = PathBuf::from(dir);
+        if !path.exists() {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&path) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "app") {
+                let name = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                items.push(AppEntry {
+                    name,
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
+        }
     }
-
-    fn load(&self) -> Pin<Box<dyn Future<Output = Vec<SourceItem>> + Send>> {
-        Box::pin(async { tokio::task::spawn_blocking(Self::scan_apps).await.unwrap() })
-    }
-
-    fn execute(&self, item: &SourceItem) -> Result<(), Box<dyn std::error::Error>> {
-        platform::macos::open_application(&item.exec_path)
-    }
+    items.sort_by(|a, b| a.name.cmp(&b.name));
+    items
 }
