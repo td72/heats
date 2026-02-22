@@ -175,24 +175,32 @@ impl State {
             Message::Execute => {
                 if let Some(item) = self.results.get(self.selected) {
                     if self.is_dmenu_session {
-                        // Dmenu mode: send selected title back to client
                         self.send_dmenu_response(Some(item.title.clone()));
-                    } else {
-                        self.execute_selected(self.selected);
                     }
                 }
-                self.hide()
+                // Capture action info before hide() clears state
+                let action = self.pending_action(self.selected);
+                // Hide first so macOS deactivates Heats before the action
+                // activates the target app — avoids focus bounce-back
+                let hide_task = self.hide();
+                if let Some((provider, dmenu_item)) = action {
+                    command::execute_action(&provider, &dmenu_item);
+                }
+                hide_task
             }
             Message::SelectAndExecute(index) => {
                 self.selected = index;
-                if let Some(item) = self.results.get(self.selected) {
+                if let Some(item) = self.results.get(index) {
                     if self.is_dmenu_session {
                         self.send_dmenu_response(Some(item.title.clone()));
-                    } else {
-                        self.execute_selected(self.selected);
                     }
                 }
-                self.hide()
+                let action = self.pending_action(index);
+                let hide_task = self.hide();
+                if let Some((provider, dmenu_item)) = action {
+                    command::execute_action(&provider, &dmenu_item);
+                }
+                hide_task
             }
             Message::ItemsLoaded(loaded_items) => {
                 // Ignore items while a dmenu session is active
@@ -365,28 +373,23 @@ impl State {
 
     // ---- Action execution ----
 
-    fn execute_selected(&self, selected_index: usize) {
-        let selected_item = match self.results.get(selected_index) {
-            Some(item) => item,
-            None => return,
-        };
-
-        // Find the LoadedItem matching this result
+    /// Extract action info (provider config + dmenu item) for the selected index,
+    /// returning owned copies so they survive hide()/reset_state().
+    fn pending_action(
+        &self,
+        selected_index: usize,
+    ) -> Option<(heats_core::config::ProviderConfig, heats_core::source::DmenuItem)> {
+        if self.is_dmenu_session {
+            return None;
+        }
+        let selected_item = self.results.get(selected_index)?;
         let loaded = self.loaded_items.iter().find(|li| {
             li.item.title == selected_item.title
                 && li.item.source_name == selected_item.source_name
                 && li.item.exec_path == selected_item.exec_path
-        });
-
-        if let Some(loaded) = loaded {
-            if let Some(provider) = self.config.provider.get(&loaded.provider_name) {
-                command::execute_action(provider, &loaded.dmenu_item);
-            } else {
-                tracing::warn!("No provider configured for '{}'", loaded.provider_name);
-            }
-        } else {
-            tracing::warn!("Could not find LoadedItem for selected result");
-        }
+        })?;
+        let provider = self.config.provider.get(&loaded.provider_name)?;
+        Some((provider.clone(), loaded.dmenu_item.clone()))
     }
 
     // ---- Dmenu ----
