@@ -25,9 +25,11 @@ pub struct ProviderConfig {
     pub source: Vec<String>,
     /// Action command + arguments (選択時に field 値を末尾に付与して実行)
     pub action: Vec<String>,
-    /// Which JSONL field to pass to the action (default: "data")
+    /// DmenuItem field to pass to the action (e.g. "data.path", "title"). Default: "data"
     #[serde(default = "default_field")]
     pub field: String,
+    /// Background cache refresh interval in seconds. None = no caching (load on demand).
+    pub cache_interval: Option<u64>,
 }
 
 fn default_field() -> String {
@@ -78,6 +80,7 @@ impl Default for Config {
                         source: vec!["heats-list-apps".to_string()],
                         action: vec!["open".to_string(), "-a".to_string()],
                         field: "data.path".to_string(),
+                        cache_interval: None,
                     },
                 ),
                 (
@@ -86,6 +89,7 @@ impl Default for Config {
                         source: vec!["heats-list-windows".to_string()],
                         action: vec!["heats-focus-window".to_string()],
                         field: "data.pid".to_string(),
+                        cache_interval: None,
                     },
                 ),
             ]),

@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use iced::widget::{column, container};
 use iced::window;
@@ -38,6 +40,11 @@ pub struct State {
     dmenu_tx: Option<oneshot::Sender<Option<String>>>,
     /// Whether current session is dmenu (external items) vs built-in
     is_dmenu_session: bool,
+
+    /// Background cache: provider name → cached items
+    provider_cache: HashMap<String, Vec<LoadedItem>>,
+    /// Last update time per cached provider
+    cache_last_updated: HashMap<String, Instant>,
 }
 
 /// Wrapper to make oneshot::Sender cloneable for Message (taken once via take()).
@@ -65,6 +72,13 @@ pub enum Message {
     DmenuSession {
         items: Vec<SourceItem>,
         response_tx: ResponseSender,
+    },
+    /// Timer tick for background cache refresh
+    CacheRefresh,
+    /// Background cache updated for a provider
+    CacheUpdated {
+        provider_name: String,
+        items: Vec<LoadedItem>,
     },
 }
 
@@ -125,9 +139,14 @@ impl State {
             loaded_items: Vec::new(),
             dmenu_tx: None,
             is_dmenu_session: false,
+            provider_cache: HashMap::new(),
+            cache_last_updated: HashMap::new(),
         };
 
-        (state, boot_task)
+        // Kick initial cache load for providers with cache_interval
+        let initial_cache_task = state.initial_cache_load();
+
+        (state, Task::batch([boot_task, initial_cache_task]))
     }
 
     pub fn title(&self, _window: window::Id) -> String {
@@ -208,8 +227,13 @@ impl State {
                     tracing::debug!("ItemsLoaded ignored (dmenu session active)");
                     return Task::none();
                 }
-                self.all_items = loaded_items.iter().map(|li| li.item.clone()).collect();
-                self.loaded_items = loaded_items;
+                // Merge with existing items (cache may have pre-populated some)
+                if self.loaded_items.is_empty() {
+                    self.loaded_items = loaded_items;
+                } else {
+                    self.loaded_items.extend(loaded_items);
+                }
+                self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
                 self.matcher.set_items(self.all_items.clone());
                 self.results = self.all_items.clone();
                 // No focus call here — WindowOpened already handled focus
@@ -298,6 +322,19 @@ impl State {
                     self.show_dmenu()
                 }
             }
+            Message::CacheRefresh => {
+                self.refresh_stale_caches()
+            }
+            Message::CacheUpdated { provider_name, items } => {
+                tracing::debug!(
+                    "CacheUpdated: provider='{}', {} items",
+                    provider_name,
+                    items.len()
+                );
+                self.provider_cache.insert(provider_name.clone(), items);
+                self.cache_last_updated.insert(provider_name, Instant::now());
+                Task::none()
+            }
         }
     }
 
@@ -327,6 +364,13 @@ impl State {
         // Normal mode needs close events to track window lifecycle
         if self.config.window.mode == WindowMode::Normal {
             subs.push(window::close_events().map(Message::WindowClosed));
+        }
+
+        // Background cache refresh timer (runs regardless of visibility)
+        if let Some(min_interval) = self.min_cache_interval() {
+            subs.push(
+                iced::time::every(min_interval).map(|_| Message::CacheRefresh),
+            );
         }
 
         if self.visible {
@@ -452,14 +496,38 @@ impl State {
             return Task::none();
         }
 
-        // Open window immediately (so macOS grants focus while user interaction is fresh),
-        // then load items in parallel
         self.visible = true;
-        let providers = self.config.provider.clone();
-        let load_task = Task::perform(
-            async move { command::load_from_providers(&provider_names, &providers).await },
-            Message::ItemsLoaded,
-        );
+
+        // Split providers into cached (instant) and uncached (need async load)
+        let mut cached_items: Vec<LoadedItem> = Vec::new();
+        let mut uncached_names: Vec<String> = Vec::new();
+
+        for name in &provider_names {
+            if let Some(items) = self.provider_cache.get(name) {
+                cached_items.extend(items.clone());
+            } else {
+                uncached_names.push(name.clone());
+            }
+        }
+
+        // Pre-populate with cached items immediately
+        if !cached_items.is_empty() {
+            self.loaded_items = cached_items;
+            self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
+            self.matcher.set_items(self.all_items.clone());
+            self.results = self.all_items.clone();
+        }
+
+        // Load uncached providers asynchronously (if any)
+        let load_task = if uncached_names.is_empty() {
+            Task::none()
+        } else {
+            let providers = self.config.provider.clone();
+            Task::perform(
+                async move { command::load_from_providers(&uncached_names, &providers).await },
+                Message::ItemsLoaded,
+            )
+        };
 
         match self.config.window.mode {
             WindowMode::Fixed => self.show_fixed(load_task),
@@ -562,5 +630,90 @@ impl State {
         self.results.clear();
         self.loaded_items.clear();
         self.matcher.update_query("");
+        // provider_cache is intentionally NOT cleared — persists across show/hide
+    }
+
+    // ---- Background cache ----
+
+    /// Returns the minimum cache_interval across all providers (for the subscription timer).
+    fn min_cache_interval(&self) -> Option<Duration> {
+        self.config
+            .provider
+            .values()
+            .filter_map(|p| p.cache_interval)
+            .min()
+            .map(Duration::from_secs)
+    }
+
+    /// Kick initial cache load for all providers with cache_interval set.
+    fn initial_cache_load(&self) -> Task<Message> {
+        let tasks: Vec<Task<Message>> = self
+            .config
+            .provider
+            .iter()
+            .filter(|(_, p)| p.cache_interval.is_some())
+            .map(|(name, p)| {
+                let name = name.clone();
+                let name_for_msg = name.clone();
+                let providers = HashMap::from([(name.clone(), p.clone())]);
+                Task::perform(
+                    async move {
+                        command::load_from_providers(&[name], &providers).await
+                    },
+                    move |items| Message::CacheUpdated {
+                        provider_name: name_for_msg,
+                        items,
+                    },
+                )
+            })
+            .collect();
+
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
+    }
+
+    /// Check each cached provider and refresh if stale.
+    fn refresh_stale_caches(&self) -> Task<Message> {
+        let now = Instant::now();
+        let tasks: Vec<Task<Message>> = self
+            .config
+            .provider
+            .iter()
+            .filter_map(|(name, p)| {
+                let interval = Duration::from_secs(p.cache_interval?);
+                let is_stale = self
+                    .cache_last_updated
+                    .get(name)
+                    .map(|t| now.duration_since(*t) >= interval)
+                    .unwrap_or(true);
+                if is_stale {
+                    Some((name.clone(), p.clone()))
+                } else {
+                    None
+                }
+            })
+            .map(|(name, p)| {
+                let name_for_msg = name.clone();
+                let providers = HashMap::from([(name.clone(), p)]);
+                Task::perform(
+                    async move {
+                        command::load_from_providers(&[name], &providers).await
+                    },
+                    move |items| Message::CacheUpdated {
+                        provider_name: name_for_msg,
+                        items,
+                    },
+                )
+            })
+            .collect();
+
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
     }
 }
