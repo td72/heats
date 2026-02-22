@@ -40,7 +40,7 @@ fn default_field() -> String {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum WindowMode {
-    /// Normal mode: window appears on the display with the mouse cursor
+    /// Normal mode: window appears on the display with keyboard focus
     Normal,
     /// Fixed mode: window always appears on a specific display (for tiling WMs like AeroSpace)
     Fixed,

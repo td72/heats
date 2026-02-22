@@ -2,12 +2,16 @@ use std::path::PathBuf;
 
 /// Resolve the runtime directory for IPC files.
 /// Uses $XDG_RUNTIME_DIR, falling back to /tmp/heats-{uid}.
+/// Creates the directory if it does not exist.
 fn runtime_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return PathBuf::from(dir);
-    }
-    let uid = unsafe { libc::getuid() };
-    PathBuf::from(format!("/tmp/xdg-runtime-{uid}"))
+    let dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        PathBuf::from(dir)
+    } else {
+        let uid = unsafe { libc::getuid() };
+        PathBuf::from(format!("/tmp/xdg-runtime-{uid}"))
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
 /// Resolve the Unix domain socket path for IPC.

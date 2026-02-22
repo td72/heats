@@ -1,7 +1,3 @@
-[hotkey]
-modifiers = "Cmd"
-key = "Semicolon"   # Cmd+;
-
 [window]
 width = 600.0
 height = 400.0
@@ -14,3 +10,28 @@ mode = "fixed"
 # 例: "LG", "Built-in", "DELL" など
 # 空欄の場合は起動時のマウスカーソル位置のディスプレイを使用
 display = "LG"
+
+# --- Provider: source (一覧取得) + action (実行) の組み合わせ ---
+
+[provider.open-apps]
+source = ["heats-list-apps"]
+action = ["open", "-a"]
+field = "data.path"
+cache_interval = 3600
+
+[provider.focus-window]
+source = ["heats-list-windows"]
+action = ["heats-focus-window"]
+field = "data.pid"
+
+# --- Mode: hotkey → providers のマッピング ---
+
+[[mode]]
+name = "launcher"
+hotkey = "Cmd+Semicolon"
+providers = ["open-apps"]
+
+[[mode]]
+name = "windows"
+hotkey = "Cmd+Quote"
+providers = ["focus-window"]

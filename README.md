@@ -12,7 +12,7 @@ A rofi-like extensible fuzzy launcher for macOS, built with Rust + [iced](https:
   - **Normal** — appears on the display with keyboard focus
   - **Fixed** — pinned to a named display (for tiling WM setups)
 - Configurable via `~/.config/heats/config.toml`
-- macOS application search (`/Applications`, `/System/Applications`, `~/Applications`)
+- macOS application search (`/Applications`, `/System/Applications`)
 
 ## Installation
 
@@ -29,22 +29,25 @@ cargo install --path .
 Create `~/.config/heats/config.toml`:
 
 ```toml
-[hotkey]
-modifiers = "Cmd"
-key = "Semicolon"   # Cmd+;
-
 [window]
 width = 600.0
 height = 400.0
-
 # "normal" = follow keyboard focus (default)
 # "fixed"  = pin to a specific display (for tiling WMs like AeroSpace)
 mode = "normal"
 
-# Display name for fixed mode (substring match)
-# e.g. "LG", "Built-in", "DELL"
-# Empty = use the display with keyboard focus at startup
-display = ""
+# Provider: source (list items) + action (execute on selection)
+[provider.open-apps]
+source = ["heats-list-apps"]
+action = ["open", "-a"]
+field = "data.path"
+cache_interval = 3600
+
+# Mode: hotkey → providers mapping
+[[mode]]
+name = "launcher"
+hotkey = "Cmd+Semicolon"
+providers = ["open-apps"]
 ```
 
 ## Key Bindings
