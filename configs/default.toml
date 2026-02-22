@@ -1,0 +1,39 @@
+[window]
+width = 600.0
+height = 400.0
+
+# "normal" = マウスカーソルのあるディスプレイに表示
+# "fixed"  = 指定ディスプレイに固定 (AeroSpace等のタイリングWM向け)
+mode = "fixed"
+
+# fixed モード時のディスプレイ名 (部分一致)
+# `aerospace list-monitors` で確認可能
+# display = "Retina"
+
+# --- Provider: source (一覧取得) + action (実行) の組み合わせ ---
+# source: JSONL を stdout に出力するコマンド
+# action: 選択時に実行するコマンド (field の値が末尾引数として渡される)
+# field:  data 内のどの値を action に渡すか (ドット記法で指定, e.g. "data.path")
+
+[provider.open-apps]
+source = ["heats-list-apps"]
+action = ["open", "-a"]
+field = "data.path"
+cache_interval = 3600
+
+[provider.focus-window]
+source = ["heats-list-windows"]
+action = ["heats-focus-window"]
+field = "data.pid"
+
+# --- Mode: hotkey → providers のマッピング ---
+
+[[mode]]
+name = "launcher"
+hotkey = "Cmd+Semicolon"
+providers = ["open-apps"]
+
+[[mode]]
+name = "windows"
+hotkey = "Cmd+Quote"
+providers = ["focus-window"]

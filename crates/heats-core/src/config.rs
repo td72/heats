@@ -108,8 +108,17 @@ impl Default for WindowConfig {
     }
 }
 
+pub fn load_from(path: &std::path::Path) -> Config {
+    let path = path.to_path_buf();
+    load_path(&path)
+}
+
 pub fn load() -> Config {
     let path = config_path();
+    load_path(&path)
+}
+
+fn load_path(path: &PathBuf) -> Config {
     if !path.exists() {
         tracing::info!("No config file found at {:?}, using defaults", path);
         return Config::default();

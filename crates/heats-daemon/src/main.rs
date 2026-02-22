@@ -30,13 +30,33 @@ fn boot() -> (State, iced::Task<app::Message>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let subcmd = args.get(1).map(|s| s.as_str());
+
+    // Parse --config <path> option (can appear anywhere before subcommand)
+    let mut config_path: Option<std::path::PathBuf> = None;
+    let mut rest_args: Vec<&str> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--config" {
+            if let Some(path) = args.get(i + 1) {
+                config_path = Some(std::path::PathBuf::from(path));
+                i += 2;
+                continue;
+            } else {
+                eprintln!("--config requires a path argument");
+                process::exit(2);
+            }
+        }
+        rest_args.push(&args[i]);
+        i += 1;
+    }
+
+    let subcmd = rest_args.first().copied();
 
     match subcmd {
         Some("stop") => cmd_stop(),
         Some("restart") => cmd_restart(),
         Some("service") => {
-            let action = args.get(2).map(|s| s.as_str());
+            let action = rest_args.get(1).copied();
             match action {
                 Some("install") => cmd_service_install(),
                 Some("uninstall") => cmd_service_uninstall(),
@@ -48,16 +68,16 @@ fn main() {
         }
         Some(other) => {
             eprintln!("Unknown command: {other}");
-            eprintln!("Usage: heatsd [stop|restart|service <install|uninstall>]");
+            eprintln!("Usage: heatsd [--config <path>] [stop|restart|service <install|uninstall>]");
             process::exit(2);
         }
-        None => cmd_run(),
+        None => cmd_run(config_path),
     }
 }
 
 // ---- Run (default) ----
 
-fn cmd_run() {
+fn cmd_run(config_path: Option<std::path::PathBuf>) {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -65,7 +85,10 @@ fn cmd_run() {
         )
         .init();
 
-    let config = heats_core::config::load();
+    let config = match &config_path {
+        Some(path) => heats_core::config::load_from(path),
+        None => heats_core::config::load(),
+    };
 
     // Clean up stale socket from previous run
     let sock = ipc::socket_path();
