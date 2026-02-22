@@ -1,0 +1,12 @@
+[package]
+name = "heats-client"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "heats"
+path = "src/main.rs"
+
+[dependencies]
+heats-core = { path = "../heats-core" }
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util"] }

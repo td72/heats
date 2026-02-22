@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/heats-client",
     "crates/heats-core",
     "crates/heats-daemon",
     "crates/heats-providers",

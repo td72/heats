@@ -50,13 +50,17 @@ Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️
 
 ### Key Architecture (Workspace)
 
-3-crate workspace: `heats-core` (共有ライブラリ), `heats-daemon` (daemon binary), `heats-providers` (軽量バイナリ群)
+4-crate workspace: `heats-core` (共有ライブラリ), `heats-client` (CLI client), `heats-daemon` (daemon binary), `heats-providers` (軽量バイナリ群)
 
 #### heats-core (lib) — 共有型 + プラットフォーム API + IPC + config
 - `crates/heats-core/src/source/` — DmenuItem, SourceItem, IconData, scan_apps, scan_windows
 - `crates/heats-core/src/config.rs` — Config, ModeConfig, ProviderConfig, WindowConfig
 - `crates/heats-core/src/platform/macos.rs` — macOS native APIs (NSWindow, NSScreen, focus_window)
-- `crates/heats-core/src/ipc/` — socket_path, PID management, IPC client
+- `crates/heats-core/src/ipc/` — socket_path, PID management
+
+#### heats-client (bin: heats) — dmenu 互換 IPC クライアント
+- `crates/heats-client/src/lib.rs` — IPC client (send_and_receive, read_stdin_items)
+- `crates/heats-client/src/main.rs` — CLI entry point
 
 #### heats-daemon (bin: heatsd) — iced + fuzzy matching + hotkey
 - `crates/heats-daemon/src/main.rs` — Entry point: hotkey init + iced daemon startup
@@ -67,6 +71,6 @@ Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️
 - `crates/heats-daemon/src/matcher/` — nucleo fuzzy matching wrapper
 - `crates/heats-daemon/src/ui/` — UI components (search_input, result_list, theme)
 
-#### heats-providers (bins: heats, heats-list-apps, heats-list-windows, heats-focus-window)
+#### heats-providers (bins: heats-list-apps, heats-list-windows, heats-focus-window)
 - Lightweight binaries that do NOT depend on iced/nucleo/global-hotkey
-- `crates/heats-providers/src/bin/` — CLI client + source/action providers
+- `crates/heats-providers/src/bin/` — source/action providers

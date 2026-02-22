@@ -17,7 +17,7 @@ pub async fn send_and_receive(
     items: Vec<String>,
     format: IpcFormat,
 ) -> io::Result<Option<String>> {
-    let sock_path = super::socket_path();
+    let sock_path = heats_core::ipc::socket_path();
 
     let stream = UnixStream::connect(&sock_path).await.map_err(|e| {
         io::Error::new(

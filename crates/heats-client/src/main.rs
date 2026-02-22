@@ -1,7 +1,6 @@
 use std::process;
 
-use heats_core::ipc;
-use heats_core::ipc::client::IpcFormat;
+use heats_client::{read_stdin_items, send_and_receive, IpcFormat};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -25,7 +24,7 @@ fn main() {
         IpcFormat::Text
     };
 
-    let items = ipc::client::read_stdin_items();
+    let items = read_stdin_items();
 
     if items.is_empty() {
         eprintln!("heats: no items received from stdin");
@@ -37,7 +36,7 @@ fn main() {
         .build()
         .expect("Failed to create tokio runtime");
 
-    match rt.block_on(ipc::client::send_and_receive(items, format)) {
+    match rt.block_on(send_and_receive(items, format)) {
         Ok(Some(selected)) => {
             println!("{selected}");
             process::exit(0);

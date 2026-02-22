@@ -1,5 +1,3 @@
-pub mod client;
-
 use std::path::PathBuf;
 
 /// Resolve the runtime directory for IPC files.

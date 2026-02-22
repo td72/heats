@@ -1474,6 +1474,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "heats-client"
+version = "0.1.0"
+dependencies = [
+ "heats-core",
+ "tokio",
+]
+
+[[package]]
 name = "heats-core"
 version = "0.1.0"
 dependencies = [
@@ -1516,7 +1524,6 @@ version = "0.1.0"
 dependencies = [
  "heats-core",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

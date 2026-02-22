@@ -4,10 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "heats"
-path = "src/bin/heats.rs"
-
-[[bin]]
 name = "heats-list-apps"
 path = "src/bin/heats-list-apps.rs"
 
@@ -22,4 +18,3 @@ path = "src/bin/heats-focus-window.rs"
 [dependencies]
 heats-core = { path = "../heats-core" }
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "macros", "net", "io-util"] }
