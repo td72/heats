@@ -1,5 +1,6 @@
 mod app;
 mod command;
+mod evaluator;
 mod hotkey;
 mod icon;
 mod ipc_server;

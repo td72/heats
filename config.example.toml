@@ -24,12 +24,22 @@ source = ["heats-list-windows"]
 action = ["heats-focus-window"]
 field = "data.pid"
 
-# --- Mode: hotkey → providers のマッピング ---
+# --- Evaluator: クエリを受け取り結果を返す (電卓など) ---
+
+[evaluator.calculator]
+source = ["heats-eval-calc"]
+# input = "stdin"              # "stdin" (default) | "arg"
+action = ["pbcopy"]
+# action_input = "stdin"       # "stdin" (default) | "arg"
+field = "data"
+
+# --- Mode: hotkey → providers + evaluators のマッピング ---
 
 [[mode]]
 name = "launcher"
 hotkey = "Cmd+Semicolon"
 providers = ["open-apps"]
+evaluators = ["calculator"]
 
 [[mode]]
 name = "windows"

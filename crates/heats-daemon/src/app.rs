@@ -8,6 +8,7 @@ use iced::{event, keyboard, Color, Element, Fill, Padding, Point, Size, Subscrip
 use tokio::sync::oneshot;
 
 use crate::command::{self, LoadedItem};
+use crate::evaluator;
 use crate::hotkey::{self, HotkeyMessage};
 use crate::ipc_server;
 use crate::matcher::engine::Matcher;
@@ -45,6 +46,13 @@ pub struct State {
     provider_cache: HashMap<String, Vec<LoadedItem>>,
     /// Last update time per cached provider
     cache_last_updated: HashMap<String, Instant>,
+
+    /// Evaluator results (displayed at the top of the list)
+    eval_items: Vec<LoadedItem>,
+    /// Debounce generation counter for evaluator queries
+    eval_generation: u64,
+    /// Active evaluator names for the current mode
+    active_evaluators: Vec<String>,
 }
 
 /// Wrapper to make oneshot::Sender cloneable for Message (taken once via take()).
@@ -78,6 +86,11 @@ pub enum Message {
     /// Background cache updated for a provider
     CacheUpdated {
         provider_name: String,
+        items: Vec<LoadedItem>,
+    },
+    /// Evaluator results (debounced)
+    EvalResults {
+        generation: u64,
         items: Vec<LoadedItem>,
     },
 }
@@ -141,6 +154,9 @@ impl State {
             is_dmenu_session: false,
             provider_cache: HashMap::new(),
             cache_last_updated: HashMap::new(),
+            eval_items: Vec::new(),
+            eval_generation: 0,
+            active_evaluators: Vec::new(),
         };
 
         // Kick initial cache load for providers with cache_interval
@@ -189,16 +205,50 @@ impl State {
                 self.query = query.clone();
                 self.selected = 0;
                 self.matcher.update_query(&query);
-                Task::none()
+
+                // Trigger evaluators with debounce
+                tracing::debug!(
+                    "QueryChanged: active_evaluators={:?}, query='{}'",
+                    self.active_evaluators, query
+                );
+                if !self.active_evaluators.is_empty() && !query.is_empty() {
+                    self.eval_generation += 1;
+                    let gen = self.eval_generation;
+                    let evaluator_names = self.active_evaluators.clone();
+                    let configs = self.config.evaluator.clone();
+                    Task::perform(
+                        async move {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            let items = evaluator::run_evaluators(&query, &evaluator_names, &configs).await;
+                            (gen, items)
+                        },
+                        |(generation, items)| Message::EvalResults { generation, items },
+                    )
+                } else {
+                    self.eval_items.clear();
+                    Task::none()
+                }
             }
             Message::Execute => {
-                if let Some(item) = self.results.get(self.selected) {
+                let eval_count = self.eval_items.len();
+                if self.selected < eval_count {
+                    // Selected an evaluator result
+                    let eval_action = self.pending_eval_action(self.selected);
+                    let hide_task = self.hide();
+                    if let Some((config, dmenu_item)) = eval_action {
+                        command::run_action(&config, &dmenu_item);
+                    }
+                    return hide_task;
+                }
+
+                let adjusted = self.selected - eval_count;
+                if let Some(item) = self.results.get(adjusted) {
                     if self.is_dmenu_session {
                         self.send_dmenu_response(item.id);
                     }
                 }
                 // Capture action info before hide() clears state
-                let action = self.pending_action(self.selected);
+                let action = self.pending_action(adjusted);
                 // Hide first so macOS deactivates Heats before the action
                 // activates the target app — avoids focus bounce-back
                 let hide_task = self.hide();
@@ -209,12 +259,23 @@ impl State {
             }
             Message::SelectAndExecute(index) => {
                 self.selected = index;
-                if let Some(item) = self.results.get(index) {
+                let eval_count = self.eval_items.len();
+                if index < eval_count {
+                    let eval_action = self.pending_eval_action(index);
+                    let hide_task = self.hide();
+                    if let Some((config, dmenu_item)) = eval_action {
+                        command::run_action(&config, &dmenu_item);
+                    }
+                    return hide_task;
+                }
+
+                let adjusted = index - eval_count;
+                if let Some(item) = self.results.get(adjusted) {
                     if self.is_dmenu_session {
                         self.send_dmenu_response(item.id);
                     }
                 }
-                let action = self.pending_action(index);
+                let action = self.pending_action(adjusted);
                 let hide_task = self.hide();
                 if let Some((provider, dmenu_item)) = action {
                     command::execute_action(&provider, &dmenu_item);
@@ -268,7 +329,8 @@ impl State {
                     key: keyboard::Key::Named(keyboard::key::Named::ArrowDown),
                     ..
                 } => {
-                    if self.selected + 1 < self.results.len() {
+                    let total = self.eval_items.len() + self.results.len();
+                    if self.selected + 1 < total {
                         self.selected += 1;
                     }
                     Task::none()
@@ -322,6 +384,16 @@ impl State {
                     self.show_dmenu()
                 }
             }
+            Message::EvalResults { generation, items } => {
+                tracing::debug!(
+                    "EvalResults: gen={}, current_gen={}, items={}",
+                    generation, self.eval_generation, items.len()
+                );
+                if generation == self.eval_generation {
+                    self.eval_items = items;
+                }
+                Task::none()
+            }
             Message::CacheRefresh => {
                 self.refresh_stale_caches()
             }
@@ -340,7 +412,15 @@ impl State {
 
     pub fn view(&self, _window: window::Id) -> Element<'_, Message> {
         let input = search_input::view(&self.query);
-        let results = result_list::view(&self.results, self.selected, self.config.window.height);
+
+        // Merge evaluator results (at top) with provider results
+        let display_items: Vec<&SourceItem> = self
+            .eval_items
+            .iter()
+            .map(|li| &li.item)
+            .chain(self.results.iter())
+            .collect();
+        let results = result_list::view(&display_items, self.selected, self.config.window.height);
 
         let content = column![input, results]
             .spacing(8)
@@ -436,6 +516,16 @@ impl State {
         Some((provider.clone(), loaded.dmenu_item.clone()))
     }
 
+    /// Extract evaluator action info for the selected eval index.
+    fn pending_eval_action(
+        &self,
+        eval_index: usize,
+    ) -> Option<(heats_core::config::EvaluatorConfig, heats_core::source::DmenuItem)> {
+        let loaded = self.eval_items.get(eval_index)?;
+        let config = self.config.evaluator.get(&loaded.provider_name)?;
+        Some((config.clone(), loaded.dmenu_item.clone()))
+    }
+
     // ---- Dmenu ----
 
     fn start_dmenu_session(
@@ -482,13 +572,13 @@ impl State {
     // ---- Show / Hide ----
 
     fn show_mode(&mut self, mode_name: &str) -> Task<Message> {
-        // Look up mode config to get provider list
-        let provider_names: Vec<String> = self
-            .config
-            .mode
-            .iter()
-            .find(|m| m.name == mode_name)
+        // Look up mode config to get provider list and evaluator list
+        let mode = self.config.mode.iter().find(|m| m.name == mode_name);
+        let provider_names: Vec<String> = mode
             .map(|m| m.providers.clone())
+            .unwrap_or_default();
+        self.active_evaluators = mode
+            .map(|m| m.evaluators.clone())
             .unwrap_or_default();
 
         if provider_names.is_empty() {
@@ -630,6 +720,9 @@ impl State {
         self.results.clear();
         self.loaded_items.clear();
         self.matcher.update_query("");
+        self.eval_items.clear();
+        self.eval_generation = 0;
+        self.active_evaluators.clear();
         // provider_cache is intentionally NOT cleared — persists across show/hide
     }
 

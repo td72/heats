@@ -18,3 +18,8 @@ path = "src/bin/heats-focus-window.rs"
 [dependencies]
 heats-core = { path = "../heats-core" }
 serde_json = "1"
+meval = "0.2"
+
+[[bin]]
+name = "heats-eval-calc"
+path = "src/bin/heats-eval-calc.rs"
