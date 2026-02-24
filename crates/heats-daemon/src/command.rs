@@ -202,7 +202,9 @@ pub fn run_action(config: &EvaluatorConfig, dmenu_item: &DmenuItem) {
                     if let Some(mut stdin) = c.stdin.take() {
                         use std::io::Write;
                         let _ = stdin.write_all(field_value.as_bytes());
+                        drop(stdin); // close stdin so the process can finish
                     }
+                    let _ = c.wait(); // reap the child to avoid zombies
                 }
                 Err(e) => {
                     tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);

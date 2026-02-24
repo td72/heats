@@ -68,22 +68,6 @@ pub async fn run_evaluators(
 }
 
 async fn run_single_evaluator(query: &str, config: &EvaluatorConfig) -> Vec<DmenuItem> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        spawn_evaluator(query, config),
-    )
-    .await;
-
-    match result {
-        Ok(items) => items,
-        Err(_) => {
-            tracing::warn!("Evaluator command {:?} timed out after 2s", config.source);
-            Vec::new()
-        }
-    }
-}
-
-async fn spawn_evaluator(query: &str, config: &EvaluatorConfig) -> Vec<DmenuItem> {
     if config.source.is_empty() {
         tracing::warn!("Empty evaluator source command");
         return Vec::new();
@@ -122,6 +106,26 @@ async fn spawn_evaluator(query: &str, config: &EvaluatorConfig) -> Vec<DmenuItem
         }
     }
 
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        read_output(&mut child),
+    )
+    .await;
+
+    match result {
+        Ok(items) => {
+            let _ = child.wait().await;
+            items
+        }
+        Err(_) => {
+            tracing::warn!("Evaluator command {:?} timed out after 2s", config.source);
+            let _ = child.kill().await;
+            Vec::new()
+        }
+    }
+}
+
+async fn read_output(child: &mut tokio::process::Child) -> Vec<DmenuItem> {
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => return Vec::new(),
@@ -143,6 +147,5 @@ async fn spawn_evaluator(query: &str, config: &EvaluatorConfig) -> Vec<DmenuItem
         }
     }
 
-    let _ = child.wait().await;
     items
 }

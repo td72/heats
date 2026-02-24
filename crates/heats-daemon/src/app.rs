@@ -391,6 +391,11 @@ impl State {
                 );
                 if generation == self.eval_generation {
                     self.eval_items = items;
+                    // Clamp selected index to valid range
+                    let total = self.eval_items.len() + self.results.len();
+                    if total > 0 && self.selected >= total {
+                        self.selected = total - 1;
+                    }
                 }
                 Task::none()
             }
