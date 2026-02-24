@@ -20,7 +20,7 @@ fn visible_count(window_height: f32) -> usize {
 /// Build the result list widget.
 /// Shows a window of items around the selected index, sized to fit the window.
 pub fn view<'a>(
-    results: &'a [SourceItem],
+    results: &[&'a SourceItem],
     selected_index: usize,
     window_height: f32,
 ) -> Element<'a, Message> {
