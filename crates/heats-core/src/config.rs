@@ -8,6 +8,7 @@ pub struct Config {
     pub window: WindowConfig,
     pub mode: Vec<ModeConfig>,
     pub provider: HashMap<String, ProviderConfig>,
+    pub evaluator: HashMap<String, EvaluatorConfig>,
 }
 
 /// A mode: hotkey → providers mapping
@@ -16,6 +17,40 @@ pub struct ModeConfig {
     pub name: String,
     pub hotkey: String,
     pub providers: Vec<String>,
+    #[serde(default)]
+    pub evaluators: Vec<String>,
+}
+
+/// How to pass input to a source/action command
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum InputMode {
+    Stdin,
+    Arg,
+}
+
+impl Default for InputMode {
+    fn default() -> Self {
+        Self::Stdin
+    }
+}
+
+/// An evaluator: query-driven source + action
+#[derive(Debug, Clone, Deserialize)]
+pub struct EvaluatorConfig {
+    /// Source command (receives query, outputs JSONL)
+    pub source: Vec<String>,
+    /// How to pass the query to the source command
+    #[serde(default)]
+    pub input: InputMode,
+    /// Action command (executed on selection)
+    pub action: Vec<String>,
+    /// How to pass the field value to the action command
+    #[serde(default)]
+    pub action_input: InputMode,
+    /// DmenuItem field to pass to the action
+    #[serde(default = "default_field")]
+    pub field: String,
 }
 
 /// A provider: source command + action command bundled together
@@ -66,11 +101,13 @@ impl Default for Config {
                     name: "launcher".to_string(),
                     hotkey: "Cmd+Semicolon".to_string(),
                     providers: vec!["open-apps".to_string(), "focus-window".to_string()],
+                    evaluators: vec!["calculator".to_string()],
                 },
                 ModeConfig {
                     name: "windows".to_string(),
                     hotkey: "Cmd+Quote".to_string(),
                     providers: vec!["focus-window".to_string()],
+                    evaluators: Vec::new(),
                 },
             ],
             provider: HashMap::from([
@@ -93,6 +130,16 @@ impl Default for Config {
                     },
                 ),
             ]),
+            evaluator: HashMap::from([(
+                "calculator".to_string(),
+                EvaluatorConfig {
+                    source: vec!["heats-eval-calc".to_string()],
+                    input: InputMode::default(),
+                    action: vec!["pbcopy".to_string()],
+                    action_input: InputMode::default(),
+                    field: "data".to_string(),
+                },
+            )]),
         }
     }
 }

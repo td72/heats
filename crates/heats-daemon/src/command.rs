@@ -6,7 +6,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::icon;
-use heats_core::config::ProviderConfig;
+use heats_core::config::{EvaluatorConfig, InputMode, ProviderConfig};
 use heats_core::source::{DmenuItem, IconData, SourceItem};
 
 /// A loaded item with metadata for action resolution
@@ -177,9 +177,63 @@ pub fn execute_action(provider: &ProviderConfig, dmenu_item: &DmenuItem) {
     }
 }
 
+/// Execute an evaluator action command with the field value from the DmenuItem.
+pub fn run_action(config: &EvaluatorConfig, dmenu_item: &DmenuItem) {
+    let field_value = dmenu_item.get_field(&config.field);
+
+    if config.action.is_empty() {
+        tracing::error!("Evaluator action command is empty");
+        return;
+    }
+
+    let program = resolve_command(&config.action[0]);
+
+    match config.action_input {
+        InputMode::Stdin => {
+            tracing::info!("Executing evaluator action (stdin): {} {:?}", program, &config.action[1..]);
+            let child = std::process::Command::new(&program)
+                .args(&config.action[1..])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            match child {
+                Ok(mut c) => {
+                    if let Some(mut stdin) = c.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(field_value.as_bytes());
+                        drop(stdin); // close stdin so the process can finish
+                    }
+                    let _ = c.wait(); // reap the child to avoid zombies
+                }
+                Err(e) => {
+                    tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);
+                }
+            }
+        }
+        InputMode::Arg => {
+            let mut args: Vec<&str> = config.action[1..].iter().map(|s| s.as_str()).collect();
+            args.push(&field_value);
+            tracing::info!("Executing evaluator action (arg): {} {:?}", program, args);
+            match std::process::Command::new(&program)
+                .args(&args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);
+                }
+            }
+        }
+    }
+}
+
 /// Resolve a command name: if it's not an absolute path, check the directory
 /// of our own executable first, then fall back to PATH lookup.
-fn resolve_command(name: &str) -> String {
+pub fn resolve_command(name: &str) -> String {
     let path = std::path::Path::new(name);
     if path.is_absolute() {
         return name.to_string();
