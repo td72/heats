@@ -9,10 +9,13 @@ use heats_core::source::{IconData, SourceItem};
 const ROW_HEIGHT_ESTIMATE: f32 = 54.0;
 /// Fixed overhead: outer padding (12*2) + search input (~44) + spacing (8)
 const LAYOUT_OVERHEAD: f32 = 76.0;
+/// Extra overhead when the tab bar is shown (~26px text + spacing)
+const TAB_BAR_OVERHEAD: f32 = 30.0;
 
 /// Calculate how many items fit in the available window height.
-fn visible_count(window_height: f32) -> usize {
-    let available = (window_height - LAYOUT_OVERHEAD).max(0.0);
+fn visible_count(window_height: f32, has_tabs: bool) -> usize {
+    let overhead = LAYOUT_OVERHEAD + if has_tabs { TAB_BAR_OVERHEAD } else { 0.0 };
+    let available = (window_height - overhead).max(0.0);
     let count = (available / ROW_HEIGHT_ESTIMATE) as usize;
     count.max(1)
 }
@@ -23,12 +26,13 @@ pub fn view<'a>(
     results: &[&'a SourceItem],
     selected_index: usize,
     window_height: f32,
+    has_tabs: bool,
 ) -> Element<'a, Message> {
     if results.is_empty() {
         return column![].into();
     }
 
-    let max_visible = visible_count(window_height);
+    let max_visible = visible_count(window_height, has_tabs);
 
     // Calculate visible window: keep selected item in view
     let start = (selected_index + 1).saturating_sub(max_visible);
