@@ -329,7 +329,7 @@ impl State {
                     ..
                 } if modifiers.control() => {
                     let offset = if modifiers.shift() { -1 } else { 1 };
-                    self.update(Message::SwitchMode { offset })
+                    self.switch_mode_by_offset(offset)
                 }
                 keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(keyboard::key::Named::ArrowUp),
@@ -766,9 +766,10 @@ impl State {
         // Reset query and results
         self.query.clear();
         self.selected = 0;
+        self.all_items.clear();
         self.results.clear();
         self.loaded_items.clear();
-        self.matcher.update_query("");
+        self.matcher = Matcher::new();
         self.eval_items.clear();
         self.eval_generation = 0;
 
