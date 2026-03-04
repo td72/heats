@@ -95,10 +95,6 @@ pub enum Message {
         generation: u64,
         items: Vec<LoadedItem>,
     },
-    /// Switch to next/previous mode tab (offset: +1 or -1)
-    SwitchMode {
-        offset: isize,
-    },
 }
 
 impl State {
@@ -414,7 +410,6 @@ impl State {
                 }
                 Task::none()
             }
-            Message::SwitchMode { offset } => self.switch_mode_by_offset(offset),
             Message::CacheRefresh => {
                 self.refresh_stale_caches()
             }
