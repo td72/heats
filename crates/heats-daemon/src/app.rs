@@ -12,7 +12,7 @@ use crate::evaluator;
 use crate::hotkey::{self, HotkeyMessage};
 use crate::ipc_server;
 use crate::matcher::engine::Matcher;
-use crate::ui::{result_list, search_input, theme};
+use crate::ui::{result_list, search_input, tab_bar, theme};
 use heats_core::config::{Config, WindowMode};
 use heats_core::source::SourceItem;
 
@@ -53,6 +53,8 @@ pub struct State {
     eval_generation: u64,
     /// Active evaluator names for the current mode
     active_evaluators: Vec<String>,
+    /// Current mode index into config.mode (None when dmenu session)
+    current_mode_index: Option<usize>,
 }
 
 /// Wrapper to make oneshot::Sender cloneable for Message (taken once via take()).
@@ -157,6 +159,7 @@ impl State {
             eval_items: Vec::new(),
             eval_generation: 0,
             active_evaluators: Vec::new(),
+            current_mode_index: None,
         };
 
         // Kick initial cache load for providers with cache_interval
@@ -317,6 +320,14 @@ impl State {
                     ..
                 } => self.hide(),
                 keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Tab),
+                    modifiers,
+                    ..
+                } if modifiers.control() => {
+                    let offset = if modifiers.shift() { -1 } else { 1 };
+                    self.switch_mode_by_offset(offset)
+                }
+                keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(keyboard::key::Named::ArrowUp),
                     ..
                 } => {
@@ -425,12 +436,15 @@ impl State {
             .map(|li| &li.item)
             .chain(self.results.iter())
             .collect();
-        let results = result_list::view(&display_items, self.selected, self.config.window.height);
 
-        let content = column![input, results]
-            .spacing(8)
-            .padding(Padding::new(12.0))
-            .height(Fill);
+        let show_tabs = !self.is_dmenu_session && self.config.mode.len() > 1;
+        let results = result_list::view(&display_items, self.selected, self.config.window.height, show_tabs);
+
+        let mut content = column![].spacing(8).padding(Padding::new(12.0)).height(Fill);
+        if show_tabs {
+            content = content.push(tab_bar::view(&self.config.mode, self.current_mode_index));
+        }
+        content = content.push(input).push(results);
 
         let main = container(content)
             .width(Fill)
@@ -471,6 +485,12 @@ impl State {
                                         keyboard::Key::Named(keyboard::key::Named::Escape),
                                     ..
                                 } => Some(Message::KeyEvent(kb_event)),
+                                keyboard::Event::KeyPressed {
+                                    key:
+                                        keyboard::Key::Named(keyboard::key::Named::Tab),
+                                    modifiers,
+                                    ..
+                                } if modifiers.control() => Some(Message::KeyEvent(kb_event)),
                                 _ => None,
                             }
                         }
@@ -578,7 +598,9 @@ impl State {
 
     fn show_mode(&mut self, mode_name: &str) -> Task<Message> {
         // Look up mode config to get provider list and evaluator list
-        let mode = self.config.mode.iter().find(|m| m.name == mode_name);
+        let mode_index = self.config.mode.iter().position(|m| m.name == mode_name);
+        self.current_mode_index = mode_index;
+        let mode = mode_index.map(|i| &self.config.mode[i]);
         let provider_names: Vec<String> = mode
             .map(|m| m.providers.clone())
             .unwrap_or_default();
@@ -719,6 +741,72 @@ impl State {
         Point::new(x as f32, y as f32)
     }
 
+    /// Switch to the next or previous mode by offset (+1 / -1), wrapping around.
+    fn switch_mode_by_offset(&mut self, offset: isize) -> Task<Message> {
+        if !self.visible || self.is_dmenu_session || self.config.mode.is_empty() {
+            return Task::none();
+        }
+
+        let current = self.current_mode_index.unwrap_or(0);
+        let len = self.config.mode.len();
+        let new_index = ((current as isize + offset).rem_euclid(len as isize)) as usize;
+
+        if new_index == current && self.current_mode_index.is_some() {
+            return Task::none();
+        }
+
+        self.current_mode_index = Some(new_index);
+        let mode = &self.config.mode[new_index];
+
+        // Reset query and results
+        self.query.clear();
+        self.selected = 0;
+        self.all_items.clear();
+        self.results.clear();
+        self.loaded_items.clear();
+        self.matcher = Matcher::new();
+        self.eval_items.clear();
+        self.eval_generation = 0;
+
+        // Set evaluators for new mode
+        self.active_evaluators = mode.evaluators.clone();
+
+        // Load providers (cached first, then async)
+        let provider_names = mode.providers.clone();
+        let mut cached_items: Vec<LoadedItem> = Vec::new();
+        let mut uncached_names: Vec<String> = Vec::new();
+
+        for name in &provider_names {
+            if let Some(items) = self.provider_cache.get(name) {
+                cached_items.extend(items.clone());
+            } else {
+                uncached_names.push(name.clone());
+            }
+        }
+
+        if !cached_items.is_empty() {
+            self.loaded_items = cached_items;
+            self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
+            self.matcher.set_items(self.all_items.clone());
+            self.results = self.all_items.clone();
+        }
+
+        let load_task = if uncached_names.is_empty() {
+            Task::none()
+        } else {
+            let providers = self.config.provider.clone();
+            Task::perform(
+                async move { command::load_from_providers(&uncached_names, &providers).await },
+                Message::ItemsLoaded,
+            )
+        };
+
+        // Refocus search input
+        let focus_task = iced::widget::operation::focus(search_input::SEARCH_INPUT_ID);
+
+        Task::batch([load_task, focus_task])
+    }
+
     fn reset_state(&mut self) {
         self.query.clear();
         self.selected = 0;
@@ -728,6 +816,7 @@ impl State {
         self.eval_items.clear();
         self.eval_generation = 0;
         self.active_evaluators.clear();
+        self.current_mode_index = None;
         // provider_cache is intentionally NOT cleared — persists across show/hide
     }
 

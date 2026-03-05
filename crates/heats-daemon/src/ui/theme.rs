@@ -98,6 +98,44 @@ pub fn result_row(theme: &Theme) -> container::Style {
     }
 }
 
+/// Style for the active tab in the tab bar
+pub fn tab_active(theme: &Theme) -> container::Style {
+    let _ = theme;
+    container::Style {
+        background: Some(
+            Color {
+                r: ACCENT.r,
+                g: ACCENT.g,
+                b: ACCENT.b,
+                a: 0.25,
+            }
+            .into(),
+        ),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 4.0.into(),
+        },
+        text_color: Some(TEXT_PRIMARY),
+        ..container::Style::default()
+    }
+}
+
+/// Style for inactive tabs in the tab bar
+pub fn tab_inactive(theme: &Theme) -> container::Style {
+    let _ = theme;
+    container::Style {
+        background: None,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 4.0.into(),
+        },
+        text_color: Some(TEXT_SECONDARY),
+        ..container::Style::default()
+    }
+}
+
 /// Style for the selected result row
 pub fn result_row_selected(theme: &Theme) -> container::Style {
     let _ = theme;
