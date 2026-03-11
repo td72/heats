@@ -11,6 +11,7 @@ use crate::command::{self, LoadedItem};
 use crate::evaluator;
 use crate::hotkey::{self, HotkeyMessage};
 use crate::ipc_server;
+use crate::keybinding::{self, KeyBinding};
 use crate::matcher::engine::Matcher;
 use crate::ui::{result_list, search_input, tab_bar, theme};
 use heats_core::config::{Config, WindowMode};
@@ -55,6 +56,8 @@ pub struct State {
     active_evaluators: Vec<String>,
     /// Current mode index into config.mode (None when dmenu session)
     current_mode_index: Option<usize>,
+    /// Parsed keybindings for the current mode (binding, action_name)
+    active_keybindings: Vec<(KeyBinding, String)>,
 }
 
 /// Wrapper to make oneshot::Sender cloneable for Message (taken once via take()).
@@ -95,6 +98,8 @@ pub enum Message {
         generation: u64,
         items: Vec<LoadedItem>,
     },
+    /// Execute a named alternative action on the selected item
+    ExecuteAction(String),
 }
 
 impl State {
@@ -160,6 +165,7 @@ impl State {
             eval_generation: 0,
             active_evaluators: Vec::new(),
             current_mode_index: None,
+            active_keybindings: Vec::new(),
         };
 
         // Kick initial cache load for providers with cache_interval
@@ -346,6 +352,25 @@ impl State {
                     }
                     Task::none()
                 }
+                keyboard::Event::KeyPressed {
+                    ref key,
+                    ref modifiers,
+                    ..
+                } => {
+                    // Check configured keybindings for alternative actions
+                    for (binding, action_name) in &self.active_keybindings {
+                        if keybinding::matches(key, modifiers, binding) {
+                            return self.update(Message::ExecuteAction(action_name.clone()));
+                        }
+                    }
+                    // Enter without modifiers = default action (replaces on_submit)
+                    if *key == keyboard::Key::Named(keyboard::key::Named::Enter)
+                        && modifiers.is_empty()
+                    {
+                        return self.update(Message::Execute);
+                    }
+                    Task::none()
+                }
                 _ => Task::none(),
             },
             Message::ActivateWindow => {
@@ -409,6 +434,23 @@ impl State {
                     }
                 }
                 Task::none()
+            }
+            Message::ExecuteAction(action_name) => {
+                let eval_count = self.eval_items.len();
+                if self.selected < eval_count {
+                    // Evaluators don't support alternative actions
+                    return Task::none();
+                }
+                let adjusted = self.selected - eval_count;
+                let action = self.pending_named_action(adjusted, &action_name);
+                if let Some((action_config, field, dmenu_item)) = action {
+                    let hide_task = self.hide();
+                    command::execute_named_action(&action_config, &field, &dmenu_item);
+                    hide_task
+                } else {
+                    tracing::debug!("No action '{}' found for selected item", action_name);
+                    Task::none()
+                }
             }
             Message::CacheRefresh => {
                 self.refresh_stale_caches()
@@ -487,10 +529,23 @@ impl State {
                                 } => Some(Message::KeyEvent(kb_event)),
                                 keyboard::Event::KeyPressed {
                                     key:
+                                        keyboard::Key::Named(keyboard::key::Named::Enter),
+                                    ..
+                                } => Some(Message::KeyEvent(kb_event)),
+                                keyboard::Event::KeyPressed {
+                                    key:
                                         keyboard::Key::Named(keyboard::key::Named::Tab),
                                     modifiers,
                                     ..
                                 } if modifiers.control() => Some(Message::KeyEvent(kb_event)),
+                                // Pass through modifier key combos (Alt+X, Ctrl+X, Cmd+X)
+                                // so keybinding-based actions work even when text_input captures
+                                keyboard::Event::KeyPressed {
+                                    modifiers,
+                                    ..
+                                } if modifiers.alt() || modifiers.control() || modifiers.command() => {
+                                    Some(Message::KeyEvent(kb_event))
+                                }
                                 _ => None,
                             }
                         }
@@ -539,6 +594,30 @@ impl State {
         })?;
         let provider = self.config.provider.get(&loaded.provider_name)?;
         Some((provider.clone(), loaded.dmenu_item.clone()))
+    }
+
+    /// Extract named action info for the selected index.
+    fn pending_named_action(
+        &self,
+        selected_index: usize,
+        action_name: &str,
+    ) -> Option<(heats_core::config::ActionConfig, String, heats_core::source::DmenuItem)> {
+        if self.is_dmenu_session {
+            return None;
+        }
+        let selected_item = self.results.get(selected_index)?;
+        let loaded = self.loaded_items.iter().find(|li| {
+            li.item.title == selected_item.title
+                && li.item.source_name == selected_item.source_name
+                && li.item.exec_path == selected_item.exec_path
+        })?;
+        let provider = self.config.provider.get(&loaded.provider_name)?;
+        let action_config = provider.actions.get(action_name)?;
+        let field = action_config
+            .field
+            .clone()
+            .unwrap_or_else(|| provider.field.clone());
+        Some((action_config.clone(), field, loaded.dmenu_item.clone()))
     }
 
     /// Extract evaluator action info for the selected eval index.
@@ -606,6 +685,9 @@ impl State {
             .unwrap_or_default();
         self.active_evaluators = mode
             .map(|m| m.evaluators.clone())
+            .unwrap_or_default();
+        self.active_keybindings = mode
+            .map(Self::parse_mode_keybindings)
             .unwrap_or_default();
 
         if provider_names.is_empty() {
@@ -768,8 +850,9 @@ impl State {
         self.eval_items.clear();
         self.eval_generation = 0;
 
-        // Set evaluators for new mode
+        // Set evaluators and keybindings for new mode
         self.active_evaluators = mode.evaluators.clone();
+        self.active_keybindings = Self::parse_mode_keybindings(mode);
 
         // Load providers (cached first, then async)
         let provider_names = mode.providers.clone();
@@ -807,6 +890,32 @@ impl State {
         Task::batch([load_task, focus_task])
     }
 
+    /// Parse keybindings from a mode config into KeyBinding + action name pairs.
+    fn parse_mode_keybindings(mode: &heats_core::config::ModeConfig) -> Vec<(KeyBinding, String)> {
+        mode.keybindings
+            .iter()
+            .filter_map(|(binding_str, action_name)| {
+                let binding = keybinding::parse(binding_str).or_else(|| {
+                    tracing::warn!("Invalid keybinding: '{}'", binding_str);
+                    None
+                })?;
+                // Shift-only combos conflict with text input (uppercase, symbols)
+                if binding.modifiers.shift()
+                    && !binding.modifiers.alt()
+                    && !binding.modifiers.control()
+                    && !binding.modifiers.command()
+                {
+                    tracing::warn!(
+                        "Keybinding '{}' uses Shift as the only modifier, which conflicts with text input and will not work",
+                        binding_str
+                    );
+                    return None;
+                }
+                Some((binding, action_name.clone()))
+            })
+            .collect()
+    }
+
     fn reset_state(&mut self) {
         self.query.clear();
         self.selected = 0;
@@ -817,6 +926,7 @@ impl State {
         self.eval_generation = 0;
         self.active_evaluators.clear();
         self.current_mode_index = None;
+        self.active_keybindings.clear();
         // provider_cache is intentionally NOT cleared — persists across show/hide
     }
 

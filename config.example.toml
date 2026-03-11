@@ -19,6 +19,16 @@ action = ["open", "-a"]
 field = "data.path"
 cache_interval = 3600
 
+# --- 代替アクション: キーバインドで選択 ---
+# field を省略するとプロバイダのデフォルト field を使用
+[provider.open-apps.actions.reveal]
+command = ["open", "-R"]
+
+[provider.open-apps.actions.copy-path]
+command = ["pbcopy"]
+field = "title"
+input = "stdin"
+
 [provider.focus-window]
 source = ["heats-list-windows"]
 action = ["heats-focus-window"]
@@ -40,6 +50,11 @@ name = "launcher"
 hotkey = "Cmd+Semicolon"
 providers = ["open-apps"]
 evaluators = ["calculator"]
+
+# --- キーバインド → アクション名マッピング ---
+[mode.keybindings]
+"Alt+Enter" = "reveal"
+"Alt+C" = "copy-path"
 
 [[mode]]
 name = "windows"

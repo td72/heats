@@ -6,7 +6,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::icon;
-use heats_core::config::{EvaluatorConfig, InputMode, ProviderConfig};
+use heats_core::config::{ActionConfig, EvaluatorConfig, InputMode, ProviderConfig};
 use heats_core::source::{DmenuItem, IconData, SourceItem};
 
 /// A loaded item with metadata for action resolution
@@ -225,6 +225,60 @@ pub fn run_action(config: &EvaluatorConfig, dmenu_item: &DmenuItem) {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);
+                }
+            }
+        }
+    }
+}
+
+/// Execute a named alternative action on a DmenuItem.
+pub fn execute_named_action(action: &ActionConfig, field: &str, dmenu_item: &DmenuItem) {
+    let field_value = dmenu_item.get_field(field);
+
+    if action.command.is_empty() {
+        tracing::error!("Named action command is empty");
+        return;
+    }
+
+    let program = resolve_command(&action.command[0]);
+
+    match action.input {
+        InputMode::Arg => {
+            let mut args: Vec<&str> = action.command[1..].iter().map(|s| s.as_str()).collect();
+            args.push(&field_value);
+            tracing::info!("Executing named action (arg): {} {:?}", program, args);
+            match std::process::Command::new(&program)
+                .args(&args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to execute named action '{}': {}", &program, e);
+                }
+            }
+        }
+        InputMode::Stdin => {
+            tracing::info!("Executing named action (stdin): {} {:?}", program, &action.command[1..]);
+            let child = std::process::Command::new(&program)
+                .args(&action.command[1..])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            match child {
+                Ok(mut c) => {
+                    if let Some(mut stdin) = c.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(field_value.as_bytes());
+                        drop(stdin);
+                    }
+                    let _ = c.wait();
+                }
+                Err(e) => {
+                    tracing::error!("Failed to execute named action '{}': {}", &program, e);
                 }
             }
         }
