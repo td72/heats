@@ -6,7 +6,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::icon;
-use heats_core::config::{EvaluatorConfig, InputMode, ProviderConfig};
+use heats_core::config::{ActionConfig, EvaluatorConfig, InputMode, ProviderConfig};
 use heats_core::source::{DmenuItem, IconData, SourceItem};
 
 /// A loaded item with metadata for action resolution
@@ -227,6 +227,35 @@ pub fn run_action(config: &EvaluatorConfig, dmenu_item: &DmenuItem) {
                     tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);
                 }
             }
+        }
+    }
+}
+
+/// Execute a named alternative action on a DmenuItem.
+pub fn execute_named_action(action: &ActionConfig, field: &str, dmenu_item: &DmenuItem) {
+    let field_value = dmenu_item.get_field(field);
+
+    if action.command.is_empty() {
+        tracing::error!("Named action command is empty");
+        return;
+    }
+
+    let program = resolve_command(&action.command[0]);
+    let mut args: Vec<&str> = action.command[1..].iter().map(|s| s.as_str()).collect();
+    args.push(&field_value);
+
+    tracing::info!("Executing named action: {} {:?}", program, args);
+
+    match std::process::Command::new(&program)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("Failed to execute named action '{}': {}", &program, e);
         }
     }
 }

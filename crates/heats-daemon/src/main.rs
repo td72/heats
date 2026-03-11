@@ -4,6 +4,7 @@ mod evaluator;
 mod hotkey;
 mod icon;
 mod ipc_server;
+mod keybinding;
 mod matcher;
 mod ui;
 

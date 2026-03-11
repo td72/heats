@@ -11,7 +11,6 @@ pub const SEARCH_INPUT_ID: &str = "heats-search-input";
 pub fn view(query: &str) -> Element<'_, Message> {
     text_input("Type to search...", query)
         .on_input(Message::QueryChanged)
-        .on_submit(Message::Execute)
         .id(SEARCH_INPUT_ID)
         .padding(12)
         .size(18)

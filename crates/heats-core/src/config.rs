@@ -19,6 +19,9 @@ pub struct ModeConfig {
     pub providers: Vec<String>,
     #[serde(default)]
     pub evaluators: Vec<String>,
+    /// Keybinding → action name mapping (e.g. "Alt+Enter" → "reveal")
+    #[serde(default)]
+    pub keybindings: HashMap<String, String>,
 }
 
 /// How to pass input to a source/action command
@@ -53,6 +56,16 @@ pub struct EvaluatorConfig {
     pub field: String,
 }
 
+/// A named alternative action for a provider
+#[derive(Debug, Clone, Deserialize)]
+pub struct ActionConfig {
+    /// Action command + arguments
+    pub command: Vec<String>,
+    /// DmenuItem field to pass to the action (overrides provider default)
+    #[serde(default)]
+    pub field: Option<String>,
+}
+
 /// A provider: source command + action command bundled together
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderConfig {
@@ -65,6 +78,9 @@ pub struct ProviderConfig {
     pub field: String,
     /// Background cache refresh interval in seconds. None = no caching (load on demand).
     pub cache_interval: Option<u64>,
+    /// Named alternative actions (e.g. "reveal" → open -R, "copy-path" → pbcopy)
+    #[serde(default)]
+    pub actions: HashMap<String, ActionConfig>,
 }
 
 fn default_field() -> String {
@@ -102,12 +118,14 @@ impl Default for Config {
                     hotkey: "Cmd+Semicolon".to_string(),
                     providers: vec!["open-apps".to_string(), "focus-window".to_string()],
                     evaluators: vec!["calculator".to_string()],
+                    keybindings: HashMap::new(),
                 },
                 ModeConfig {
                     name: "windows".to_string(),
                     hotkey: "Cmd+Quote".to_string(),
                     providers: vec!["focus-window".to_string()],
                     evaluators: Vec::new(),
+                    keybindings: HashMap::new(),
                 },
             ],
             provider: HashMap::from([
@@ -118,6 +136,7 @@ impl Default for Config {
                         action: vec!["open".to_string(), "-a".to_string()],
                         field: "data.path".to_string(),
                         cache_interval: None,
+                        actions: HashMap::new(),
                     },
                 ),
                 (
@@ -127,6 +146,7 @@ impl Default for Config {
                         action: vec!["heats-focus-window".to_string()],
                         field: "data.pid".to_string(),
                         cache_interval: None,
+                        actions: HashMap::new(),
                     },
                 ),
             ]),
