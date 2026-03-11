@@ -64,6 +64,9 @@ pub struct ActionConfig {
     /// DmenuItem field to pass to the action (overrides provider default)
     #[serde(default)]
     pub field: Option<String>,
+    /// How to pass the field value to the action command ("arg" or "stdin"). Default: "arg"
+    #[serde(default = "default_input_arg")]
+    pub input: InputMode,
 }
 
 /// A provider: source command + action command bundled together
@@ -81,6 +84,10 @@ pub struct ProviderConfig {
     /// Named alternative actions (e.g. "reveal" → open -R, "copy-path" → pbcopy)
     #[serde(default)]
     pub actions: HashMap<String, ActionConfig>,
+}
+
+fn default_input_arg() -> InputMode {
+    InputMode::Arg
 }
 
 fn default_field() -> String {

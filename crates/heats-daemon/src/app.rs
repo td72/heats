@@ -443,11 +443,14 @@ impl State {
                 }
                 let adjusted = self.selected - eval_count;
                 let action = self.pending_named_action(adjusted, &action_name);
-                let hide_task = self.hide();
                 if let Some((action_config, field, dmenu_item)) = action {
+                    let hide_task = self.hide();
                     command::execute_named_action(&action_config, &field, &dmenu_item);
+                    hide_task
+                } else {
+                    tracing::debug!("No action '{}' found for selected item", action_name);
+                    Task::none()
                 }
-                hide_task
             }
             Message::CacheRefresh => {
                 self.refresh_stale_caches()
@@ -540,7 +543,7 @@ impl State {
                                 keyboard::Event::KeyPressed {
                                     modifiers,
                                     ..
-                                } if modifiers.alt() || modifiers.command() => {
+                                } if modifiers.alt() || modifiers.control() || modifiers.command() => {
                                     Some(Message::KeyEvent(kb_event))
                                 }
                                 _ => None,

@@ -27,6 +27,7 @@ command = ["open", "-R"]
 [provider.open-apps.actions.copy-path]
 command = ["pbcopy"]
 field = "title"
+input = "stdin"
 
 [provider.focus-window]
 source = ["heats-list-windows"]
