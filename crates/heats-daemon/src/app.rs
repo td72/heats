@@ -899,6 +899,18 @@ impl State {
                     tracing::warn!("Invalid keybinding: '{}'", binding_str);
                     None
                 })?;
+                // Shift-only combos conflict with text input (uppercase, symbols)
+                if binding.modifiers.shift()
+                    && !binding.modifiers.alt()
+                    && !binding.modifiers.control()
+                    && !binding.modifiers.command()
+                {
+                    tracing::warn!(
+                        "Keybinding '{}' uses Shift as the only modifier, which conflicts with text input and will not work",
+                        binding_str
+                    );
+                    return None;
+                }
                 Some((binding, action_name.clone()))
             })
             .collect()
