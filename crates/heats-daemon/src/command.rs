@@ -150,8 +150,6 @@ async fn spawn_and_read(source: &[String]) -> Vec<(DmenuItem, Option<IconData>)>
 
 /// Execute an action by running the provider's action command with the field value from the DmenuItem.
 pub fn execute_action(provider: &ProviderConfig, dmenu_item: &DmenuItem) {
-    use heats_core::config::InputMode;
-
     let field_value = dmenu_item.get_field(&provider.field);
 
     if provider.action.is_empty() {
