@@ -12,35 +12,39 @@ mode = "fixed"
 display = "LG"
 
 # --- Provider: source (一覧取得) + action (実行) の組み合わせ ---
+#
+# source / action はコマンドパイプラインとして二重配列で指定:
+#   [["cmd1", "arg"], ["cmd2"]]  → cmd1 arg | cmd2
+#
+# field の値をアクションに渡す方法は自動判定:
+#   - {} プレースホルダがあれば、その位置に値を展開 (arg モード)
+#   - {} がなければ、最初のコマンドの stdin に値を渡す (stdin モード)
 
 [provider.open-apps]
-source = ["heats-list-apps"]
-action = ["open", "-a"]
+source = [["heats-list-apps"]]
+action = [["open", "-a", "{}"]]
 field = "data.path"
 cache_interval = 3600
 
 # --- 代替アクション: キーバインドで選択 ---
 # field を省略するとプロバイダのデフォルト field を使用
 [provider.open-apps.actions.reveal]
-command = ["open", "-R"]
+command = [["open", "-R", "{}"]]
 
 [provider.open-apps.actions.copy-path]
-command = ["pbcopy"]
+command = [["pbcopy"]]
 field = "title"
-input = "stdin"
 
 [provider.focus-window]
-source = ["heats-list-windows"]
-action = ["heats-focus-window"]
+source = [["heats-list-windows"]]
+action = [["heats-focus-window", "{}"]]
 field = "data.pid"
 
 # --- Evaluator: クエリを受け取り結果を返す (電卓など) ---
 
 [evaluator.calculator]
-source = ["heats-eval-calc"]
-# input = "stdin"              # "stdin" (default) | "arg"
-action = ["pbcopy"]
-# action_input = "stdin"       # "stdin" (default) | "arg"
+source = [["heats-eval-calc"]]
+action = [["pbcopy"]]
 field = "data"
 
 # --- Mode: hotkey → providers + evaluators のマッピング ---
@@ -59,17 +63,18 @@ evaluators = ["calculator"]
 # --- Provider: pbring (クリップボード履歴) ---
 # 前提: pbring がインストール済みで pbringd が起動していること
 # https://github.com/td72/pbring
+#
+# パイプライン例: pbring decrypt の出力を pbcopy に渡す
+# {} は data.id の値に展開される
 
 [provider.clipboard]
-source = ["heats-list-pbring"]
-action = ["sh", "-c", "pbring decrypt | pbcopy"]
+source = [["heats-list-pbring"]]
+action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
-action_input = "stdin"
 
 [provider.clipboard.actions.delete]
-command = ["pbring", "delete"]
+command = [["pbring", "delete"]]
 field = "data.id"
-input = "stdin"
 
 [[mode]]
 name = "windows"

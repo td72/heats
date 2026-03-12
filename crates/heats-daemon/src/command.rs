@@ -6,7 +6,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::icon;
-use heats_core::config::{ActionConfig, EvaluatorConfig, InputMode, ProviderConfig};
+use heats_core::config::{pipeline_has_placeholder, ActionConfig, EvaluatorConfig, Pipeline, ProviderConfig};
 use heats_core::source::{DmenuItem, IconData, SourceItem};
 
 /// A loaded item with metadata for action resolution
@@ -65,71 +65,36 @@ pub async fn load_from_providers(
     all_items
 }
 
-/// Spawn a single source command and parse its JSONL output.
-async fn load_single_source(source: &[String]) -> Vec<(DmenuItem, Option<IconData>)> {
+/// Spawn a single source pipeline and parse its JSONL output.
+async fn load_single_source(source: &Pipeline) -> Vec<(DmenuItem, Option<IconData>)> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        spawn_and_read(source),
+        spawn_and_read_pipeline(source, None),
     )
     .await;
 
     match result {
-        Ok(items) => items,
+        Ok(Ok(items)) => items,
+        Ok(Err(e)) => {
+            tracing::warn!("Source pipeline {:?} failed: {}", source, e);
+            Vec::new()
+        }
         Err(_) => {
-            tracing::warn!("Source command {:?} timed out after 2s", source);
+            tracing::warn!("Source pipeline {:?} timed out after 2s", source);
             Vec::new()
         }
     }
 }
 
-async fn spawn_and_read(source: &[String]) -> Vec<(DmenuItem, Option<IconData>)> {
-    if source.is_empty() {
-        tracing::warn!("Empty source command");
-        return Vec::new();
-    }
+/// Spawn a pipeline of commands and read JSONL from the last command's stdout.
+/// Optionally pass `input` to the first command's stdin.
+async fn spawn_and_read_pipeline(
+    pipeline: &Pipeline,
+    input: Option<&str>,
+) -> Result<Vec<(DmenuItem, Option<IconData>)>, String> {
+    let output = spawn_pipeline_async(pipeline, input).await?;
 
-    // Resolve command: if not an absolute path, look next to our own executable first
-    let program = resolve_command(&source[0]);
-
-    let child = Command::new(&program)
-        .args(&source[1..])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn();
-
-    let mut child = match child {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to spawn source command {:?}: {}", source, e);
-            return Vec::new();
-        }
-    };
-
-    let stdout = match child.stdout.take() {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
-
-    let reader = BufReader::new(stdout);
-    let mut lines = reader.lines();
-    let mut dmenu_items = Vec::new();
-
-    while let Ok(Some(line)) = lines.next_line().await {
-        if line.trim().is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<DmenuItem>(&line) {
-            Ok(dmenu_item) => {
-                dmenu_items.push(dmenu_item);
-            }
-            Err(e) => {
-                tracing::debug!("Failed to parse JSONL line from {:?}: {}", source, e);
-            }
-        }
-    }
-
-    // Wait for the process to exit
-    let _ = child.wait().await;
+    let dmenu_items = parse_jsonl_output(&output);
 
     // Load icons in a blocking thread to avoid blocking the async runtime
     tokio::task::spawn_blocking(move || {
@@ -145,169 +110,216 @@ async fn spawn_and_read(source: &[String]) -> Vec<(DmenuItem, Option<IconData>)>
             .collect()
     })
     .await
-    .unwrap_or_default()
+    .map_err(|e| format!("Icon loading task failed: {}", e))
 }
 
-/// Execute an action by running the provider's action command with the field value from the DmenuItem.
+/// Parse JSONL output into DmenuItems.
+fn parse_jsonl_output(output: &str) -> Vec<DmenuItem> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            serde_json::from_str::<DmenuItem>(line)
+                .map_err(|e| {
+                    tracing::debug!("Failed to parse JSONL line: {}", e);
+                    e
+                })
+                .ok()
+        })
+        .collect()
+}
+
+/// Spawn an async pipeline and return the final stdout as a String.
+async fn spawn_pipeline_async(
+    pipeline: &Pipeline,
+    input: Option<&str>,
+) -> Result<String, String> {
+    if pipeline.is_empty() {
+        return Err("Empty pipeline".to_string());
+    }
+
+    let mut prev_stdout: Option<tokio::process::ChildStdout> = None;
+    let mut children: Vec<tokio::process::Child> = Vec::new();
+
+    for (i, cmd) in pipeline.iter().enumerate() {
+        if cmd.is_empty() {
+            return Err("Empty command in pipeline".to_string());
+        }
+
+        let program = resolve_command(&cmd[0]);
+        let mut command = Command::new(&program);
+        command.args(&cmd[1..]);
+
+        // stdin: pipe from previous command, or from input, or null
+        if let Some(stdout) = prev_stdout.take() {
+            let std_stdout = stdout.into_owned_fd().map_err(|e| format!("stdin conversion: {}", e))?;
+            command.stdin(std_stdout);
+        } else if i == 0 && input.is_some() {
+            command.stdin(Stdio::piped());
+        } else {
+            command.stdin(Stdio::null());
+        }
+
+        command.stdout(Stdio::piped()).stderr(Stdio::null());
+
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to spawn '{}': {}", program, e))?;
+
+        // Write input to first command's stdin
+        if i == 0 {
+            if let Some(input_data) = input {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = stdin.write_all(input_data.as_bytes()).await;
+                    drop(stdin);
+                }
+            }
+        }
+
+        prev_stdout = child.stdout.take();
+        children.push(child);
+    }
+
+    // Read all output from the last command
+    let output = if let Some(stdout) = prev_stdout {
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
+        let mut output = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            output.push_str(&line);
+            output.push('\n');
+        }
+        output
+    } else {
+        String::new()
+    };
+
+    // Wait for all children and check exit status
+    for mut child in children {
+        let status = child.wait().await.map_err(|e| format!("wait failed: {}", e))?;
+        if !status.success() {
+            return Err(format!("Pipeline command exited with {}", status));
+        }
+    }
+
+    Ok(output)
+}
+
+/// Spawn a sync pipeline for action execution.
+/// Returns after the pipeline completes.
+fn spawn_pipeline_sync(pipeline: &Pipeline, input: Option<&str>) -> Result<(), String> {
+    if pipeline.is_empty() {
+        return Err("Empty pipeline".to_string());
+    }
+
+    let len = pipeline.len();
+    let mut prev_stdout: Option<std::process::ChildStdout> = None;
+    let mut children: Vec<std::process::Child> = Vec::new();
+
+    for (i, cmd) in pipeline.iter().enumerate() {
+        if cmd.is_empty() {
+            return Err("Empty command in pipeline".to_string());
+        }
+
+        let program = resolve_command(&cmd[0]);
+        let mut command = std::process::Command::new(&program);
+        command.args(&cmd[1..]);
+
+        // stdin
+        if let Some(stdout) = prev_stdout.take() {
+            command.stdin(stdout);
+        } else if i == 0 && input.is_some() {
+            command.stdin(Stdio::piped());
+        } else {
+            command.stdin(Stdio::null());
+        }
+
+        // stdout: pipe between commands, null for last
+        if i < len - 1 {
+            command.stdout(Stdio::piped());
+        } else {
+            command.stdout(Stdio::null());
+        }
+
+        command.stderr(Stdio::null());
+
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to spawn '{}': {}", program, e))?;
+
+        // Write input to first command's stdin
+        if i == 0 {
+            if let Some(input_data) = input {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(input_data.as_bytes());
+                    drop(stdin);
+                }
+            }
+        }
+
+        prev_stdout = child.stdout.take();
+        children.push(child);
+    }
+
+    // Wait for all children
+    for mut child in children {
+        let status = child.wait().map_err(|e| format!("wait failed: {}", e))?;
+        if !status.success() {
+            return Err(format!("Pipeline command exited with {}", status));
+        }
+    }
+
+    Ok(())
+}
+
+/// Expand `{}` placeholders in a pipeline with the given value.
+fn expand_placeholder(pipeline: &Pipeline, value: &str) -> Pipeline {
+    pipeline
+        .iter()
+        .map(|cmd| {
+            cmd.iter()
+                .map(|arg| arg.replace("{}", value))
+                .collect()
+        })
+        .collect()
+}
+
+/// Execute a pipeline with a field value: auto-detect arg (placeholder) vs stdin mode.
+fn run_pipeline_with_field(pipeline: &Pipeline, field_value: &str) {
+    if pipeline_has_placeholder(pipeline) {
+        // Arg mode: expand {} placeholders
+        let expanded = expand_placeholder(pipeline, field_value);
+        tracing::info!("Executing pipeline (arg): {:?}", expanded);
+        if let Err(e) = spawn_pipeline_sync(&expanded, None) {
+            tracing::error!("Pipeline execution failed: {}", e);
+        }
+    } else {
+        // Stdin mode: pass field value to first command's stdin
+        tracing::info!("Executing pipeline (stdin): {:?}", pipeline);
+        if let Err(e) = spawn_pipeline_sync(pipeline, Some(field_value)) {
+            tracing::error!("Pipeline execution failed: {}", e);
+        }
+    }
+}
+
+/// Execute an action by running the provider's action pipeline with the field value from the DmenuItem.
 pub fn execute_action(provider: &ProviderConfig, dmenu_item: &DmenuItem) {
     let field_value = dmenu_item.get_field(&provider.field);
-
-    if provider.action.is_empty() {
-        tracing::error!("Provider action command is empty");
-        return;
-    }
-
-    let program = resolve_command(&provider.action[0]);
-
-    match provider.action_input {
-        InputMode::Arg => {
-            let mut args: Vec<&str> = provider.action[1..].iter().map(|s| s.as_str()).collect();
-            args.push(&field_value);
-            tracing::info!("Executing action (arg): {} {:?}", program, args);
-            match std::process::Command::new(&program)
-                .args(&args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to execute action '{}': {}", &program, e);
-                }
-            }
-        }
-        InputMode::Stdin => {
-            tracing::info!("Executing action (stdin): {} {:?}", program, &provider.action[1..]);
-            let child = std::process::Command::new(&program)
-                .args(&provider.action[1..])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-            match child {
-                Ok(mut c) => {
-                    if let Some(mut stdin) = c.stdin.take() {
-                        use std::io::Write;
-                        let _ = stdin.write_all(field_value.as_bytes());
-                        drop(stdin);
-                    }
-                    let _ = c.wait();
-                }
-                Err(e) => {
-                    tracing::error!("Failed to execute action '{}': {}", &program, e);
-                }
-            }
-        }
-    }
+    run_pipeline_with_field(&provider.action, &field_value);
 }
 
-/// Execute an evaluator action command with the field value from the DmenuItem.
+/// Execute an evaluator action pipeline with the field value from the DmenuItem.
 pub fn run_action(config: &EvaluatorConfig, dmenu_item: &DmenuItem) {
     let field_value = dmenu_item.get_field(&config.field);
-
-    if config.action.is_empty() {
-        tracing::error!("Evaluator action command is empty");
-        return;
-    }
-
-    let program = resolve_command(&config.action[0]);
-
-    match config.action_input {
-        InputMode::Stdin => {
-            tracing::info!("Executing evaluator action (stdin): {} {:?}", program, &config.action[1..]);
-            let child = std::process::Command::new(&program)
-                .args(&config.action[1..])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-            match child {
-                Ok(mut c) => {
-                    if let Some(mut stdin) = c.stdin.take() {
-                        use std::io::Write;
-                        let _ = stdin.write_all(field_value.as_bytes());
-                        drop(stdin); // close stdin so the process can finish
-                    }
-                    let _ = c.wait(); // reap the child to avoid zombies
-                }
-                Err(e) => {
-                    tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);
-                }
-            }
-        }
-        InputMode::Arg => {
-            let mut args: Vec<&str> = config.action[1..].iter().map(|s| s.as_str()).collect();
-            args.push(&field_value);
-            tracing::info!("Executing evaluator action (arg): {} {:?}", program, args);
-            match std::process::Command::new(&program)
-                .args(&args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to execute evaluator action '{}': {}", &program, e);
-                }
-            }
-        }
-    }
+    run_pipeline_with_field(&config.action, &field_value);
 }
 
 /// Execute a named alternative action on a DmenuItem.
 pub fn execute_named_action(action: &ActionConfig, field: &str, dmenu_item: &DmenuItem) {
     let field_value = dmenu_item.get_field(field);
-
-    if action.command.is_empty() {
-        tracing::error!("Named action command is empty");
-        return;
-    }
-
-    let program = resolve_command(&action.command[0]);
-
-    match action.input {
-        InputMode::Arg => {
-            let mut args: Vec<&str> = action.command[1..].iter().map(|s| s.as_str()).collect();
-            args.push(&field_value);
-            tracing::info!("Executing named action (arg): {} {:?}", program, args);
-            match std::process::Command::new(&program)
-                .args(&args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to execute named action '{}': {}", &program, e);
-                }
-            }
-        }
-        InputMode::Stdin => {
-            tracing::info!("Executing named action (stdin): {} {:?}", program, &action.command[1..]);
-            let child = std::process::Command::new(&program)
-                .args(&action.command[1..])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-            match child {
-                Ok(mut c) => {
-                    if let Some(mut stdin) = c.stdin.take() {
-                        use std::io::Write;
-                        let _ = stdin.write_all(field_value.as_bytes());
-                        drop(stdin);
-                    }
-                    let _ = c.wait();
-                }
-                Err(e) => {
-                    tracing::error!("Failed to execute named action '{}': {}", &program, e);
-                }
-            }
-        }
-    }
+    run_pipeline_with_field(&action.command, &field_value);
 }
 
 /// Resolve a command name: if it's not an absolute path, check the directory

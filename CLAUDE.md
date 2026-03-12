@@ -54,7 +54,7 @@ Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️
 
 #### heats-core (lib) — 共有型 + プラットフォーム API + IPC + config
 - `crates/heats-core/src/source/` — DmenuItem, SourceItem, IconData, scan_apps, scan_windows
-- `crates/heats-core/src/config.rs` — Config, ModeConfig, ProviderConfig, WindowConfig
+- `crates/heats-core/src/config.rs` — Config, ModeConfig, ProviderConfig, Pipeline, WindowConfig
 - `crates/heats-core/src/platform/macos.rs` — macOS native APIs (NSWindow, NSScreen, focus_window)
 - `crates/heats-core/src/ipc/` — socket_path, PID management
 
@@ -65,7 +65,7 @@ Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️
 #### heats-daemon (bin: heatsd) — iced + fuzzy matching + hotkey
 - `crates/heats-daemon/src/main.rs` — Entry point: hotkey init + iced daemon startup
 - `crates/heats-daemon/src/app.rs` — Iced Daemon: State, Message, update, view, subscription
-- `crates/heats-daemon/src/command.rs` — Provider command execution + item loading
+- `crates/heats-daemon/src/command.rs` — Pipeline command execution + item loading
 - `crates/heats-daemon/src/hotkey.rs` — global-hotkey → iced Subscription bridge
 - `crates/heats-daemon/src/ipc_server.rs` — Unix socket server for dmenu protocol
 - `crates/heats-daemon/src/matcher/` — nucleo fuzzy matching wrapper

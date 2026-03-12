@@ -24,33 +24,25 @@ pub struct ModeConfig {
     pub keybindings: HashMap<String, String>,
 }
 
-/// How to pass input to a source/action command
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum InputMode {
-    Stdin,
-    Arg,
-}
+/// A pipeline of commands: each inner Vec is [program, arg1, arg2, ...].
+/// Commands are piped together: cmd1 | cmd2 | cmd3.
+///
+/// Use `{}` placeholder in arguments to insert the field value (arg mode).
+/// If no `{}` is found, the field value is passed via stdin to the first command.
+pub type Pipeline = Vec<Vec<String>>;
 
-impl Default for InputMode {
-    fn default() -> Self {
-        Self::Stdin
-    }
+/// Check if a pipeline contains a `{}` placeholder in any command's arguments.
+pub fn pipeline_has_placeholder(pipeline: &Pipeline) -> bool {
+    pipeline.iter().any(|cmd| cmd.iter().any(|arg| arg.contains("{}")))
 }
 
 /// An evaluator: query-driven source + action
 #[derive(Debug, Clone, Deserialize)]
 pub struct EvaluatorConfig {
-    /// Source command (receives query, outputs JSONL)
-    pub source: Vec<String>,
-    /// How to pass the query to the source command
-    #[serde(default)]
-    pub input: InputMode,
-    /// Action command (executed on selection)
-    pub action: Vec<String>,
-    /// How to pass the field value to the action command
-    #[serde(default)]
-    pub action_input: InputMode,
+    /// Source command pipeline (receives query, outputs JSONL)
+    pub source: Pipeline,
+    /// Action command pipeline (executed on selection)
+    pub action: Pipeline,
     /// DmenuItem field to pass to the action
     #[serde(default = "default_field")]
     pub field: String,
@@ -59,38 +51,28 @@ pub struct EvaluatorConfig {
 /// A named alternative action for a provider
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActionConfig {
-    /// Action command + arguments
-    pub command: Vec<String>,
+    /// Action command pipeline
+    pub command: Pipeline,
     /// DmenuItem field to pass to the action (overrides provider default)
     #[serde(default)]
     pub field: Option<String>,
-    /// How to pass the field value to the action command ("arg" or "stdin"). Default: "arg"
-    #[serde(default = "default_input_arg")]
-    pub input: InputMode,
 }
 
 /// A provider: source command + action command bundled together
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderConfig {
-    /// Source command + arguments (stdout に JSONL を出力)
-    pub source: Vec<String>,
-    /// Action command + arguments (選択時に field 値を渡して実行)
-    pub action: Vec<String>,
+    /// Source command pipeline (stdout に JSONL を出力)
+    pub source: Pipeline,
+    /// Action command pipeline (選択時に field 値を渡して実行)
+    pub action: Pipeline,
     /// DmenuItem field to pass to the action (e.g. "data.path", "title"). Default: "data"
     #[serde(default = "default_field")]
     pub field: String,
-    /// How to pass the field value to the action command ("arg" or "stdin"). Default: "arg"
-    #[serde(default = "default_input_arg")]
-    pub action_input: InputMode,
     /// Background cache refresh interval in seconds. None = no caching (load on demand).
     pub cache_interval: Option<u64>,
     /// Named alternative actions (e.g. "reveal" → open -R, "copy-path" → pbcopy)
     #[serde(default)]
     pub actions: HashMap<String, ActionConfig>,
-}
-
-fn default_input_arg() -> InputMode {
-    InputMode::Arg
 }
 
 fn default_field() -> String {
@@ -142,10 +124,9 @@ impl Default for Config {
                 (
                     "open-apps".to_string(),
                     ProviderConfig {
-                        source: vec!["heats-list-apps".to_string()],
-                        action: vec!["open".to_string(), "-a".to_string()],
+                        source: vec![vec!["heats-list-apps".to_string()]],
+                        action: vec![vec!["open".to_string(), "-a".to_string(), "{}".to_string()]],
                         field: "data.path".to_string(),
-                        action_input: InputMode::Arg,
                         cache_interval: None,
                         actions: HashMap::new(),
                     },
@@ -153,10 +134,9 @@ impl Default for Config {
                 (
                     "focus-window".to_string(),
                     ProviderConfig {
-                        source: vec!["heats-list-windows".to_string()],
-                        action: vec!["heats-focus-window".to_string()],
+                        source: vec![vec!["heats-list-windows".to_string()]],
+                        action: vec![vec!["heats-focus-window".to_string(), "{}".to_string()]],
                         field: "data.pid".to_string(),
-                        action_input: InputMode::Arg,
                         cache_interval: None,
                         actions: HashMap::new(),
                     },
@@ -165,10 +145,8 @@ impl Default for Config {
             evaluator: HashMap::from([(
                 "calculator".to_string(),
                 EvaluatorConfig {
-                    source: vec!["heats-eval-calc".to_string()],
-                    input: InputMode::default(),
-                    action: vec!["pbcopy".to_string()],
-                    action_input: InputMode::default(),
+                    source: vec![vec!["heats-eval-calc".to_string()]],
+                    action: vec![vec!["pbcopy".to_string()]],
                     field: "data".to_string(),
                 },
             )]),
@@ -202,7 +180,7 @@ fn load_path(path: &PathBuf) -> Config {
         tracing::info!("No config file found at {:?}, using defaults", path);
         return Config::default();
     }
-    match std::fs::read_to_string(&path) {
+    match std::fs::read_to_string(path) {
         Ok(contents) => match toml::from_str(&contents) {
             Ok(config) => {
                 tracing::info!("Loaded config from {:?}", path);
