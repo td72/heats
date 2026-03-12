@@ -158,21 +158,46 @@ pub fn execute_action(provider: &ProviderConfig, dmenu_item: &DmenuItem) {
     }
 
     let program = resolve_command(&provider.action[0]);
-    let mut args: Vec<&str> = provider.action[1..].iter().map(|s| s.as_str()).collect();
-    args.push(&field_value);
 
-    tracing::info!("Executing action: {} {:?}", program, args);
-
-    match std::process::Command::new(&program)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(_) => {}
-        Err(e) => {
-            tracing::error!("Failed to execute action '{}': {}", &program, e);
+    match provider.action_input {
+        InputMode::Arg => {
+            let mut args: Vec<&str> = provider.action[1..].iter().map(|s| s.as_str()).collect();
+            args.push(&field_value);
+            tracing::info!("Executing action (arg): {} {:?}", program, args);
+            match std::process::Command::new(&program)
+                .args(&args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to execute action '{}': {}", &program, e);
+                }
+            }
+        }
+        InputMode::Stdin => {
+            tracing::info!("Executing action (stdin): {} {:?}", program, &provider.action[1..]);
+            let child = std::process::Command::new(&program)
+                .args(&provider.action[1..])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            match child {
+                Ok(mut c) => {
+                    if let Some(mut stdin) = c.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(field_value.as_bytes());
+                        drop(stdin);
+                    }
+                    let _ = c.wait();
+                }
+                Err(e) => {
+                    tracing::error!("Failed to execute action '{}': {}", &program, e);
+                }
+            }
         }
     }
 }

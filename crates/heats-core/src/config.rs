@@ -74,11 +74,14 @@ pub struct ActionConfig {
 pub struct ProviderConfig {
     /// Source command + arguments (stdout に JSONL を出力)
     pub source: Vec<String>,
-    /// Action command + arguments (選択時に field 値を末尾に付与して実行)
+    /// Action command + arguments (選択時に field 値を渡して実行)
     pub action: Vec<String>,
     /// DmenuItem field to pass to the action (e.g. "data.path", "title"). Default: "data"
     #[serde(default = "default_field")]
     pub field: String,
+    /// How to pass the field value to the action command ("arg" or "stdin"). Default: "arg"
+    #[serde(default = "default_input_arg")]
+    pub action_input: InputMode,
     /// Background cache refresh interval in seconds. None = no caching (load on demand).
     pub cache_interval: Option<u64>,
     /// Named alternative actions (e.g. "reveal" → open -R, "copy-path" → pbcopy)
@@ -142,6 +145,7 @@ impl Default for Config {
                         source: vec!["heats-list-apps".to_string()],
                         action: vec!["open".to_string(), "-a".to_string()],
                         field: "data.path".to_string(),
+                        action_input: InputMode::Arg,
                         cache_interval: None,
                         actions: HashMap::new(),
                     },
@@ -152,6 +156,7 @@ impl Default for Config {
                         source: vec!["heats-list-windows".to_string()],
                         action: vec!["heats-focus-window".to_string()],
                         field: "data.pid".to_string(),
+                        action_input: InputMode::Arg,
                         cache_interval: None,
                         actions: HashMap::new(),
                     },
