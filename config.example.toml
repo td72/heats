@@ -56,7 +56,30 @@ evaluators = ["calculator"]
 "Alt+Enter" = "reveal"
 "Alt+C" = "copy-path"
 
+# --- Provider: pbring (クリップボード履歴) ---
+# 前提: pbring がインストール済みで pbringd が起動していること
+# https://github.com/td72/pbring
+
+[provider.clipboard]
+source = ["heats-list-pbring"]
+action = ["sh", "-c", "pbring decrypt | pbcopy"]
+field = "data.id"
+action_input = "stdin"
+
+[provider.clipboard.actions.delete]
+command = ["pbring", "delete"]
+field = "data.id"
+input = "stdin"
+
 [[mode]]
 name = "windows"
 hotkey = "Cmd+Quote"
 providers = ["focus-window"]
+
+[[mode]]
+name = "clipboard"
+hotkey = "Cmd+Shift+V"
+providers = ["clipboard"]
+
+[mode.keybindings]
+"Alt+D" = "delete"
