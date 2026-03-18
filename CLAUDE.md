@@ -16,6 +16,7 @@ cargo build                          # workspace全体ビルド
 cargo clippy                         # lint
 cargo build -p heats-daemon          # daemon単体ビルド
 cargo build -p heats-providers       # プロバイダ単体ビルド
+cargo test                           # テスト実行
 cargo run -p heats-daemon            # run daemon (debug)
 RUST_LOG=heats=debug cargo run -p heats-daemon  # run with debug logging
 ```
@@ -71,6 +72,7 @@ Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️
 - `crates/heats-daemon/src/matcher/` — nucleo fuzzy matching wrapper
 - `crates/heats-daemon/src/ui/` — UI components (search_input, result_list, theme)
 
-#### heats-providers (bins: heats-list-apps, heats-list-windows, heats-focus-window)
+#### heats-providers (bins: heats-list-apps, heats-list-windows, heats-focus-window, heats-eval-calc, heats-from-tsv)
 - Lightweight binaries that do NOT depend on iced/nucleo/global-hotkey
 - `crates/heats-providers/src/bin/` — source/action providers
+- `heats-from-tsv` — generic TSV/CSV → DmenuItem JSONL converter (--collapse for whitespace-delimited input)
