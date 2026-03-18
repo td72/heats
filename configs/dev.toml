@@ -24,7 +24,7 @@ hotkey = "Cmd+Semicolon"
 providers = ["open-apps"]
 
 [provider.clipboard]
-source = [["heats-list-pbring"]]
+source = [["pbring", "list"], ["heats-from-tsv", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
 action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
 
