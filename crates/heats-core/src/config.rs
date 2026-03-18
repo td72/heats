@@ -11,7 +11,7 @@ pub struct Config {
     pub evaluator: HashMap<String, EvaluatorConfig>,
 }
 
-/// A mode: hotkey → providers mapping
+/// A mode: optional hotkey + providers/evaluators mapping
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModeConfig {
     pub name: String,
