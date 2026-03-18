@@ -64,8 +64,8 @@ evaluators = ["calculator"]
 # 前提: pbring がインストール済みで pbringd が起動していること
 # https://github.com/td72/pbring
 #
-# パイプライン例: pbring decrypt の出力を pbcopy に渡す
-# {} は data.id の値に展開される
+# パイプライン例: pbring get の出力を pbcopy に渡す
+# {} がないため data.id の値は最初のコマンドの stdin に渡される
 
 [provider.clipboard]
 source = [["heats-list-pbring"]]

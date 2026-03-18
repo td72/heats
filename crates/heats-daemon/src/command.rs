@@ -113,7 +113,9 @@ pub fn parse_jsonl(output: &str) -> Vec<DmenuItem> {
 }
 
 /// Spawn an async pipeline, return the final stdout as a String.
-/// Applies a timeout to the entire pipeline; kills all children on timeout or error.
+/// Applies a timeout to the entire pipeline. On timeout, the future is cancelled
+/// and all child processes are dropped (killed via SIGKILL on Unix).
+/// On pipeline errors, children are also cleaned up via drop.
 pub async fn spawn_pipeline_async(
     pipeline: &Pipeline,
     input: Option<&str>,
@@ -278,15 +280,24 @@ fn spawn_pipeline_sync(pipeline: &Pipeline, input: Option<&str>) -> Result<(), S
         children.push(child);
     }
 
-    // Wait for all children
+    // Wait for all children (always reap all to avoid zombies)
+    let mut first_error: Option<String> = None;
     for mut child in children {
-        let status = child.wait().map_err(|e| format!("wait failed: {}", e))?;
-        if !status.success() {
-            return Err(format!("Pipeline command exited with {}", status));
+        match child.wait() {
+            Ok(status) if !status.success() && first_error.is_none() => {
+                first_error = Some(format!("Pipeline command exited with {}", status));
+            }
+            Err(e) if first_error.is_none() => {
+                first_error = Some(format!("wait failed: {}", e));
+            }
+            _ => {}
         }
     }
 
-    Ok(())
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Expand `{}` placeholders in a pipeline with the given value.
