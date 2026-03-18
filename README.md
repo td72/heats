@@ -1,5 +1,7 @@
 # Heats
 
+[日本語](README.ja.md)
+
 A rofi-like extensible fuzzy launcher for macOS, built with Rust + [iced](https://iced.rs).
 
 ## Features
