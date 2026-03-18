@@ -97,3 +97,8 @@ providers = ["clipboard"]
 
 [mode.keybindings]
 "Alt+D" = "delete"
+
+# --- ホットキーなしのモード (Ctrl+Tab で切り替え) ---
+# [[mode]]
+# name = "processes"
+# providers = ["processes"]
