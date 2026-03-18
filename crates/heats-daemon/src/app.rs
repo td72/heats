@@ -14,7 +14,8 @@ use crate::ipc_server;
 use crate::keybinding::{self, KeyBinding};
 use crate::matcher::engine::Matcher;
 use crate::ui::{result_list, search_input, tab_bar, theme};
-use heats_core::config::{Config, WindowMode};
+use heats_core::config::Config;
+use heats_core::config::WindowMode;
 use heats_core::source::SourceItem;
 
 pub struct State {

@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::process::Stdio;
+use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
-
-use crate::command::{resolve_command, LoadedItem};
-use heats_core::config::{EvaluatorConfig, InputMode};
+use crate::command::{expand_placeholder, parse_jsonl, spawn_pipeline_async, LoadedItem};
+use heats_core::config::{pipeline_has_placeholder, EvaluatorConfig};
 use heats_core::source::{DmenuItem, SourceItem};
 
 /// Run all evaluators for the given query and return results.
@@ -69,83 +66,32 @@ pub async fn run_evaluators(
 
 async fn run_single_evaluator(query: &str, config: &EvaluatorConfig) -> Vec<DmenuItem> {
     if config.source.is_empty() {
-        tracing::warn!("Empty evaluator source command");
+        tracing::warn!("Empty evaluator source pipeline");
         return Vec::new();
     }
 
-    let program = resolve_command(&config.source[0]);
-    let mut cmd = Command::new(&program);
-    cmd.args(&config.source[1..]);
+    let has_placeholder = pipeline_has_placeholder(&config.source);
 
-    match config.input {
-        InputMode::Stdin => {
-            cmd.stdin(Stdio::piped());
-        }
-        InputMode::Arg => {
-            cmd.args([query]);
-            cmd.stdin(Stdio::null());
-        }
-    }
-
-    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to spawn evaluator {:?}: {}", config.source, e);
-            return Vec::new();
-        }
+    // Determine pipeline and input based on placeholder presence
+    let (pipeline, input) = if has_placeholder {
+        (expand_placeholder(&config.source, query), None)
+    } else {
+        // Pass query + newline via stdin
+        (config.source.clone(), Some(format!("{}\n", query)))
     };
 
-    // Write query to stdin if stdin mode
-    if config.input == InputMode::Stdin {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(query.as_bytes()).await;
-            let _ = stdin.write_all(b"\n").await;
-            drop(stdin);
-        }
-    }
-
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        read_output(&mut child),
+    let result = spawn_pipeline_async(
+        &pipeline,
+        input.as_deref(),
+        Duration::from_secs(2),
     )
     .await;
 
     match result {
-        Ok(items) => {
-            let _ = child.wait().await;
-            items
-        }
-        Err(_) => {
-            tracing::warn!("Evaluator command {:?} timed out after 2s", config.source);
-            let _ = child.kill().await;
+        Ok(output) => parse_jsonl(&output),
+        Err(e) => {
+            tracing::warn!("Evaluator pipeline {:?} failed: {}", config.source, e);
             Vec::new()
         }
     }
-}
-
-async fn read_output(child: &mut tokio::process::Child) -> Vec<DmenuItem> {
-    let stdout = match child.stdout.take() {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
-
-    let reader = BufReader::new(stdout);
-    let mut lines = reader.lines();
-    let mut items = Vec::new();
-
-    while let Ok(Some(line)) = lines.next_line().await {
-        if line.trim().is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<DmenuItem>(&line) {
-            Ok(item) => items.push(item),
-            Err(e) => {
-                tracing::debug!("Failed to parse evaluator JSONL: {}", e);
-            }
-        }
-    }
-
-    items
 }

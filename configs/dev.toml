@@ -8,14 +8,14 @@ height = 400.0
 mode = "fixed"
 
 [provider.open-apps]
-source = ["heats-list-apps"]
-action = ["open", "-a"]
+source = [["heats-list-apps"]]
+action = [["open", "-a", "{}"]]
 field = "data.path"
 cache_interval = 3600
 
 [provider.focus-window]
-source = ["heats-list-windows"]
-action = ["heats-focus-window"]
+source = [["heats-list-windows"]]
+action = [["heats-focus-window", "{}"]]
 field = "data.pid"
 
 [[mode]]
@@ -24,15 +24,13 @@ hotkey = "Cmd+Semicolon"
 providers = ["open-apps"]
 
 [provider.clipboard]
-source = ["heats-list-pbring"]
-action = ["sh", "-c", "pbring decrypt | pbcopy"]
+source = [["heats-list-pbring"]]
+action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
-action_input = "stdin"
 
 [provider.clipboard.actions.delete]
-command = ["pbring", "delete"]
+command = [["pbring", "delete"]]
 field = "data.id"
-input = "stdin"
 
 [[mode]]
 name = "windows"
@@ -41,7 +39,7 @@ providers = ["focus-window"]
 
 [[mode]]
 name = "clipboard"
-hotkey = "Cmd+Shift+V"
+hotkey = "Cmd+y"
 providers = ["clipboard"]
 
 [mode.keybindings]
