@@ -222,3 +222,128 @@ fn parse_col(args: &[String], i: usize, name: &str) -> Result<usize, String> {
     val.parse::<usize>()
         .map_err(|_| format!("invalid column number for {name}: '{val}'"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
+    }
+
+    // --- parse_args ---
+
+    #[test]
+    fn parse_args_title_only() {
+        let a = args(&["--title", "1"]);
+        let opts = parse_args(&a).unwrap();
+        assert_eq!(opts.title_col, 1);
+        assert!(opts.subtitle_cols.is_empty());
+        assert!(opts.data_fields.is_empty());
+        assert_eq!(opts.delimiter, '\t');
+        assert!(!opts.header);
+        assert!(!opts.collapse);
+    }
+
+    #[test]
+    fn parse_args_all_options() {
+        let a = args(&[
+            "--title", "4", "--subtitle", "3,2", "--data-field", "id=1",
+            "--delimiter", ",", "--header", "--collapse",
+        ]);
+        let opts = parse_args(&a).unwrap();
+        assert_eq!(opts.title_col, 4);
+        assert_eq!(opts.subtitle_cols, vec![3, 2]);
+        assert_eq!(opts.data_fields, vec![("id".to_string(), 1)]);
+        assert_eq!(opts.delimiter, ',');
+        assert!(opts.header);
+        assert!(opts.collapse);
+        assert_eq!(opts.max_col, 4);
+    }
+
+    #[test]
+    fn parse_args_missing_title() {
+        let a = args(&["--subtitle", "1"]);
+        assert!(parse_args(&a).is_err());
+    }
+
+    #[test]
+    fn parse_args_unknown_option() {
+        let a = args(&["--title", "1", "--bogus"]);
+        assert!(parse_args(&a).is_err());
+    }
+
+    #[test]
+    fn parse_args_multiple_data_fields() {
+        let a = args(&["--title", "1", "--data-field", "pid=2", "--data-field", "name=3"]);
+        let opts = parse_args(&a).unwrap();
+        assert_eq!(opts.data_fields.len(), 2);
+        assert_eq!(opts.data_fields[0], ("pid".to_string(), 2));
+        assert_eq!(opts.data_fields[1], ("name".to_string(), 3));
+    }
+
+    // --- get_col ---
+
+    #[test]
+    fn get_col_1based() {
+        let cols = vec!["a", "b", "c"];
+        assert_eq!(get_col(&cols, 1), Some("a"));
+        assert_eq!(get_col(&cols, 2), Some("b"));
+        assert_eq!(get_col(&cols, 3), Some("c"));
+    }
+
+    #[test]
+    fn get_col_zero_returns_none() {
+        let cols = vec!["a"];
+        assert_eq!(get_col(&cols, 0), None);
+    }
+
+    #[test]
+    fn get_col_out_of_range() {
+        let cols = vec!["a", "b"];
+        assert_eq!(get_col(&cols, 5), None);
+    }
+
+    // --- split_collapse ---
+
+    #[test]
+    fn split_collapse_basic() {
+        let cols = split_collapse("a  b  c", ' ', 3);
+        assert_eq!(cols, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn split_collapse_joins_remainder() {
+        // max_col=3, so columns 1,2 are split, rest becomes col 3
+        let cols = split_collapse("user  123  /usr/bin/my app --flag", ' ', 3);
+        assert_eq!(cols, vec!["user", "123", "/usr/bin/my app --flag"]);
+    }
+
+    #[test]
+    fn split_collapse_leading_trailing_delimiters() {
+        let cols = split_collapse("  a  b  ", ' ', 2);
+        assert_eq!(cols, vec!["a", "b  "]);
+    }
+
+    #[test]
+    fn split_collapse_single_col() {
+        let cols = split_collapse("  hello world  ", ' ', 1);
+        assert_eq!(cols, vec!["hello world  "]);
+    }
+
+    #[test]
+    fn split_collapse_fewer_cols_than_max() {
+        let cols = split_collapse("a  b", ' ', 5);
+        assert_eq!(cols, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn split_collapse_ps_aux_like() {
+        let line = "hosokawa  40854  94.0  0.7  /Applications/Adobe Acrobat DC/AdobeAcrobat";
+        let cols = split_collapse(line, ' ', 5);
+        assert_eq!(cols, vec![
+            "hosokawa", "40854", "94.0", "0.7",
+            "/Applications/Adobe Acrobat DC/AdobeAcrobat",
+        ]);
+    }
+}

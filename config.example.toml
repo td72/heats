@@ -76,6 +76,15 @@ field = "data.id"
 command = [["pbring", "delete"]]
 field = "data.id"
 
+# --- Provider: プロセス一覧 (heats-from-tsv --collapse の活用例) ---
+# ps aux のようなスペース区切りで列幅が不定な出力に対応
+# --collapse: 連続デリミタをまとめ、最大列以降を最後の列に結合
+
+# [provider.processes]
+# source = [["ps", "aux"], ["heats-from-tsv", "--header", "--delimiter", " ", "--collapse", "--title", "11", "--subtitle", "1,3,4", "--data-field", "pid=2"]]
+# action = [["kill", "{}"]]
+# field = "data.pid"
+
 [[mode]]
 name = "windows"
 hotkey = "Cmd+Quote"
