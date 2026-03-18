@@ -25,9 +25,5 @@ name = "heats-eval-calc"
 path = "src/bin/heats-eval-calc.rs"
 
 [[bin]]
-name = "heats-list-pbring"
-path = "src/bin/heats-list-pbring.rs"
-
-[[bin]]
 name = "heats-from-tsv"
 path = "src/bin/heats-from-tsv.rs"
