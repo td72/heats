@@ -32,19 +32,19 @@ field = "data.id"
 command = [["pbring", "delete"]]
 field = "data.id"
 
-[provider.processes]
-source = [["ps", "aux"], ["heats-from-tsv", "--header", "--delimiter", " ", "--collapse", "--title", "11", "--subtitle", "1,3,4", "--data-field", "pid=2"]]
-action = [["kill", "{}"]]
-field = "data.pid"
+# [provider.processes]
+# source = [["ps", "aux"], ["heats-from-tsv", "--header", "--delimiter", " ", "--collapse", "--title", "11", "--subtitle", "1,3,4", "--data-field", "pid=2"]]
+# action = [["kill", "{}"]]
+# field = "data.pid"
 
 [[mode]]
 name = "windows"
 hotkey = "Cmd+Quote"
 providers = ["focus-window"]
 
-[[mode]]
-name = "processes"
-providers = ["processes"]
+# [[mode]]
+# name = "processes"
+# providers = ["processes"]
 
 [[mode]]
 name = "clipboard"
