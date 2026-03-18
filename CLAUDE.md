@@ -72,7 +72,7 @@ Use gitmoji prefix: `✨` new feature, `🐛` bug fix, `🩹` minor fix, `♻️
 - `crates/heats-daemon/src/matcher/` — nucleo fuzzy matching wrapper
 - `crates/heats-daemon/src/ui/` — UI components (search_input, result_list, theme)
 
-#### heats-providers (bins: heats-list-apps, heats-list-windows, heats-focus-window, heats-eval-calc, heats-from-tsv)
+#### heats-providers (bins: heats-list-apps, heats-list-windows, heats-focus-window, heats-eval-calc, heats-from-table)
 - Lightweight binaries that do NOT depend on iced/nucleo/global-hotkey
 - `crates/heats-providers/src/bin/` — source/action providers
-- `heats-from-tsv` — generic TSV/CSV → DmenuItem JSONL converter (--collapse for whitespace-delimited input)
+- `heats-from-table` — generic TSV/CSV → DmenuItem JSONL converter (--collapse for whitespace-delimited input)

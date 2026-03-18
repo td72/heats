@@ -17,7 +17,7 @@ macOS 向け rofi 風の拡張可能なファジーランチャー。Rust + [ice
 - パイプラインコマンド — `sh -c` 不要でコマンドをパイプ接続
 - プロバイダごとの代替アクション（例: Finder で表示、パスをコピー）
 - Evaluator — クエリ駆動の結果表示（例: 電卓）
-- `heats-from-tsv` — 任意の CLI ツールをプロバイダとして使える汎用 TSV/CSV → JSONL 変換ツール
+- `heats-from-table` — 任意の CLI ツールをプロバイダとして使える汎用 TSV/CSV → JSONL 変換ツール
 - macOS アプリケーション検索（`/Applications`、`/System/Applications`）
 
 ## インストール
@@ -58,7 +58,7 @@ command = [["open", "-R", "{}"]]
 
 # クリップボード履歴 (要 pbring: https://github.com/td72/pbring)
 [provider.clipboard]
-source = [["pbring", "list"], ["heats-from-tsv", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
+source = [["pbring", "list"], ["heats-from-table", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
 action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
 
@@ -97,16 +97,16 @@ providers = ["clipboard"]
 | `Ctrl+Tab` | 次のモードへ切り替え |
 | `Ctrl+Shift+Tab` | 前のモードへ切り替え |
 
-## heats-from-tsv
+## heats-from-table
 
 TSV/CSV を DmenuItem JSONL に変換する汎用ツール。表形式の出力を持つ任意の CLI コマンドを heats のプロバイダとして利用可能にします。
 
 ```bash
 # pbring のクリップボード履歴を heats アイテムに変換
-pbring list | heats-from-tsv --title 4 --subtitle 3,2 --data-field id=1
+pbring list | heats-from-table --title 4 --subtitle 3,2 --data-field id=1
 
 # プロセス一覧 (--collapse でスペース区切りの可変幅列に対応)
-ps aux | heats-from-tsv --header --delimiter ' ' --collapse --title 11 --subtitle 1,3,4 --data-field pid=2
+ps aux | heats-from-table --header --delimiter ' ' --collapse --title 11 --subtitle 1,3,4 --data-field pid=2
 ```
 
 オプション: `--title <col>`, `--subtitle <col>[,col...]`, `--data-field <key>=<col>`, `--delimiter <char>` (デフォルト: タブ), `--header` (1行目をスキップ), `--collapse` (連続デリミタをまとめ、最大列以降を最後の列に結合)

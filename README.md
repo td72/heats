@@ -19,7 +19,7 @@ A rofi-like extensible fuzzy launcher for macOS, built with Rust + [iced](https:
 - Provider pipeline commands — chain commands with pipes, no `sh -c` needed
 - Alternative actions per provider (e.g., Reveal in Finder, copy path)
 - Evaluators — query-driven results (e.g., calculator)
-- `heats-from-tsv` — generic TSV/CSV-to-JSONL converter for using any CLI tool as a provider
+- `heats-from-table` — generic TSV/CSV-to-JSONL converter for using any CLI tool as a provider
 - macOS application search (`/Applications`, `/System/Applications`)
 
 ## Installation
@@ -60,7 +60,7 @@ command = [["open", "-R", "{}"]]
 
 # Clipboard history (requires pbring: https://github.com/td72/pbring)
 [provider.clipboard]
-source = [["pbring", "list"], ["heats-from-tsv", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
+source = [["pbring", "list"], ["heats-from-table", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
 action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
 
@@ -99,16 +99,16 @@ See [`config.example.toml`](config.example.toml) for the full example.
 | `Ctrl+Tab` | Switch to next mode |
 | `Ctrl+Shift+Tab` | Switch to previous mode |
 
-## heats-from-tsv
+## heats-from-table
 
 A generic TSV/CSV-to-DmenuItem JSONL converter. Turns any CLI tool that outputs tabular data into a heats provider.
 
 ```bash
 # Convert pbring clipboard history into heats items
-pbring list | heats-from-tsv --title 4 --subtitle 3,2 --data-field id=1
+pbring list | heats-from-table --title 4 --subtitle 3,2 --data-field id=1
 
 # Process list (--collapse handles variable-width whitespace columns)
-ps aux | heats-from-tsv --header --delimiter ' ' --collapse --title 11 --subtitle 1,3,4 --data-field pid=2
+ps aux | heats-from-table --header --delimiter ' ' --collapse --title 11 --subtitle 1,3,4 --data-field pid=2
 ```
 
 Options: `--title <col>`, `--subtitle <col>[,col...]`, `--data-field <key>=<col>`, `--delimiter <char>` (default: tab), `--header` (skip first line), `--collapse` (merge consecutive delimiters, join remainder into last column).

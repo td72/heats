@@ -6,7 +6,7 @@ fn main() {
     let opts = match parse_args(&args[1..]) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("heats-from-tsv: {e}");
+            eprintln!("heats-from-table: {e}");
             std::process::exit(1);
         }
     };
