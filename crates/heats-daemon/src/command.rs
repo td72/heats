@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -67,54 +68,36 @@ pub async fn load_from_providers(
 
 /// Spawn a single source pipeline and parse its JSONL output.
 async fn load_single_source(source: &Pipeline) -> Vec<(DmenuItem, Option<IconData>)> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        spawn_and_read_pipeline(source, None),
-    )
-    .await;
+    let result = spawn_pipeline_async(source, None, Duration::from_secs(2)).await;
 
     match result {
-        Ok(Ok(items)) => items,
-        Ok(Err(e)) => {
-            tracing::warn!("Source pipeline {:?} failed: {}", source, e);
-            Vec::new()
+        Ok(output) => {
+            let dmenu_items = parse_jsonl(&output);
+            // Load icons in a blocking thread to avoid blocking the async runtime
+            tokio::task::spawn_blocking(move || {
+                dmenu_items
+                    .into_iter()
+                    .map(|dmenu_item| {
+                        let icon = dmenu_item
+                            .icon_path
+                            .as_ref()
+                            .and_then(|p| icon::load_app_icon(&PathBuf::from(p)));
+                        (dmenu_item, icon)
+                    })
+                    .collect()
+            })
+            .await
+            .unwrap_or_default()
         }
-        Err(_) => {
-            tracing::warn!("Source pipeline {:?} timed out after 2s", source);
+        Err(e) => {
+            tracing::warn!("Source pipeline {:?} failed: {}", source, e);
             Vec::new()
         }
     }
 }
 
-/// Spawn a pipeline of commands and read JSONL from the last command's stdout.
-/// Optionally pass `input` to the first command's stdin.
-async fn spawn_and_read_pipeline(
-    pipeline: &Pipeline,
-    input: Option<&str>,
-) -> Result<Vec<(DmenuItem, Option<IconData>)>, String> {
-    let output = spawn_pipeline_async(pipeline, input).await?;
-
-    let dmenu_items = parse_jsonl_output(&output);
-
-    // Load icons in a blocking thread to avoid blocking the async runtime
-    tokio::task::spawn_blocking(move || {
-        dmenu_items
-            .into_iter()
-            .map(|dmenu_item| {
-                let icon = dmenu_item
-                    .icon_path
-                    .as_ref()
-                    .and_then(|p| icon::load_app_icon(&PathBuf::from(p)));
-                (dmenu_item, icon)
-            })
-            .collect()
-    })
-    .await
-    .map_err(|e| format!("Icon loading task failed: {}", e))
-}
-
 /// Parse JSONL output into DmenuItems.
-fn parse_jsonl_output(output: &str) -> Vec<DmenuItem> {
+pub fn parse_jsonl(output: &str) -> Vec<DmenuItem> {
     output
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -129,8 +112,23 @@ fn parse_jsonl_output(output: &str) -> Vec<DmenuItem> {
         .collect()
 }
 
-/// Spawn an async pipeline and return the final stdout as a String.
-async fn spawn_pipeline_async(
+/// Spawn an async pipeline, return the final stdout as a String.
+/// Applies a timeout to the entire pipeline; kills all children on timeout or error.
+pub async fn spawn_pipeline_async(
+    pipeline: &Pipeline,
+    input: Option<&str>,
+    timeout: Duration,
+) -> Result<String, String> {
+    let result = tokio::time::timeout(timeout, run_pipeline(pipeline, input)).await;
+
+    match result {
+        Ok(inner) => inner,
+        Err(_) => Err(format!("Pipeline {:?} timed out after {:?}", pipeline, timeout)),
+    }
+}
+
+/// Internal: spawn pipeline commands, write input, read output, wait for exit.
+async fn run_pipeline(
     pipeline: &Pipeline,
     input: Option<&str>,
 ) -> Result<String, String> {
@@ -143,6 +141,7 @@ async fn spawn_pipeline_async(
 
     for (i, cmd) in pipeline.iter().enumerate() {
         if cmd.is_empty() {
+            kill_all(&mut children).await;
             return Err("Empty command in pipeline".to_string());
         }
 
@@ -152,7 +151,9 @@ async fn spawn_pipeline_async(
 
         // stdin: pipe from previous command, or from input, or null
         if let Some(stdout) = prev_stdout.take() {
-            let std_stdout = stdout.into_owned_fd().map_err(|e| format!("stdin conversion: {}", e))?;
+            let std_stdout = stdout
+                .into_owned_fd()
+                .map_err(|e| format!("stdin conversion: {}", e))?;
             command.stdin(std_stdout);
         } else if i == 0 && input.is_some() {
             command.stdin(Stdio::piped());
@@ -162,9 +163,13 @@ async fn spawn_pipeline_async(
 
         command.stdout(Stdio::piped()).stderr(Stdio::null());
 
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("Failed to spawn '{}': {}", program, e))?;
+        let mut child = match command.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                kill_all(&mut children).await;
+                return Err(format!("Failed to spawn '{}': {}", program, e));
+            }
+        };
 
         // Write input to first command's stdin
         if i == 0 {
@@ -197,13 +202,23 @@ async fn spawn_pipeline_async(
 
     // Wait for all children and check exit status
     for mut child in children {
-        let status = child.wait().await.map_err(|e| format!("wait failed: {}", e))?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("wait failed: {}", e))?;
         if !status.success() {
             return Err(format!("Pipeline command exited with {}", status));
         }
     }
 
     Ok(output)
+}
+
+/// Kill all child processes in a pipeline.
+async fn kill_all(children: &mut [tokio::process::Child]) {
+    for child in children.iter_mut() {
+        let _ = child.kill().await;
+    }
 }
 
 /// Spawn a sync pipeline for action execution.
@@ -275,7 +290,7 @@ fn spawn_pipeline_sync(pipeline: &Pipeline, input: Option<&str>) -> Result<(), S
 }
 
 /// Expand `{}` placeholders in a pipeline with the given value.
-fn expand_placeholder(pipeline: &Pipeline, value: &str) -> Pipeline {
+pub fn expand_placeholder(pipeline: &Pipeline, value: &str) -> Pipeline {
     pipeline
         .iter()
         .map(|cmd| {

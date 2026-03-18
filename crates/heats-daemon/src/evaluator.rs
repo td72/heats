@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::process::Stdio;
+use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
-
-use crate::command::{resolve_command, LoadedItem};
-use heats_core::config::{pipeline_has_placeholder, EvaluatorConfig, Pipeline};
+use crate::command::{expand_placeholder, parse_jsonl, spawn_pipeline_async, LoadedItem};
+use heats_core::config::{pipeline_has_placeholder, EvaluatorConfig};
 use heats_core::source::{DmenuItem, SourceItem};
 
 /// Run all evaluators for the given query and return results.
@@ -73,123 +70,28 @@ async fn run_single_evaluator(query: &str, config: &EvaluatorConfig) -> Vec<Dmen
         return Vec::new();
     }
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        spawn_evaluator_pipeline(&config.source, query),
+    let has_placeholder = pipeline_has_placeholder(&config.source);
+
+    // Determine pipeline and input based on placeholder presence
+    let (pipeline, input) = if has_placeholder {
+        (expand_placeholder(&config.source, query), None)
+    } else {
+        // Pass query + newline via stdin
+        (config.source.clone(), Some(format!("{}\n", query)))
+    };
+
+    let result = spawn_pipeline_async(
+        &pipeline,
+        input.as_deref(),
+        Duration::from_secs(2),
     )
     .await;
 
     match result {
-        Ok(Ok(output)) => parse_jsonl(&output),
-        Ok(Err(e)) => {
+        Ok(output) => parse_jsonl(&output),
+        Err(e) => {
             tracing::warn!("Evaluator pipeline {:?} failed: {}", config.source, e);
             Vec::new()
         }
-        Err(_) => {
-            tracing::warn!("Evaluator pipeline {:?} timed out after 2s", config.source);
-            Vec::new()
-        }
     }
-}
-
-/// Spawn an evaluator source pipeline.
-/// Query is passed via `{}` placeholder (arg mode) or stdin (if no placeholder).
-async fn spawn_evaluator_pipeline(
-    pipeline: &Pipeline,
-    query: &str,
-) -> Result<String, String> {
-    if pipeline.is_empty() {
-        return Err("Empty pipeline".to_string());
-    }
-
-    let has_placeholder = pipeline_has_placeholder(pipeline);
-
-    // Expand placeholders if present
-    let expanded: Pipeline = if has_placeholder {
-        pipeline
-            .iter()
-            .map(|cmd| cmd.iter().map(|arg| arg.replace("{}", query)).collect())
-            .collect()
-    } else {
-        pipeline.clone()
-    };
-
-    let mut prev_stdout: Option<tokio::process::ChildStdout> = None;
-    let mut children: Vec<tokio::process::Child> = Vec::new();
-
-    for (i, cmd) in expanded.iter().enumerate() {
-        if cmd.is_empty() {
-            return Err("Empty command in pipeline".to_string());
-        }
-
-        let program = resolve_command(&cmd[0]);
-        let mut command = Command::new(&program);
-        command.args(&cmd[1..]);
-
-        if let Some(stdout) = prev_stdout.take() {
-            let std_stdout = stdout.into_owned_fd().map_err(|e| format!("stdin conversion: {}", e))?;
-            command.stdin(std_stdout);
-        } else if i == 0 && !has_placeholder {
-            command.stdin(Stdio::piped());
-        } else {
-            command.stdin(Stdio::null());
-        }
-
-        command.stdout(Stdio::piped()).stderr(Stdio::null());
-
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("Failed to spawn '{}': {}", program, e))?;
-
-        // Write query to first command's stdin if no placeholder
-        if i == 0 && !has_placeholder {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(query.as_bytes()).await;
-                let _ = stdin.write_all(b"\n").await;
-                drop(stdin);
-            }
-        }
-
-        prev_stdout = child.stdout.take();
-        children.push(child);
-    }
-
-    // Read output from last command
-    let output = if let Some(stdout) = prev_stdout {
-        let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
-        let mut output = String::new();
-        while let Ok(Some(line)) = lines.next_line().await {
-            output.push_str(&line);
-            output.push('\n');
-        }
-        output
-    } else {
-        String::new()
-    };
-
-    // Wait for all children
-    for mut child in children {
-        let status = child.wait().await.map_err(|e| format!("wait failed: {}", e))?;
-        if !status.success() {
-            return Err(format!("Pipeline command exited with {}", status));
-        }
-    }
-
-    Ok(output)
-}
-
-fn parse_jsonl(output: &str) -> Vec<DmenuItem> {
-    output
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| {
-            serde_json::from_str::<DmenuItem>(line)
-                .map_err(|e| {
-                    tracing::debug!("Failed to parse evaluator JSONL: {}", e);
-                    e
-                })
-                .ok()
-        })
-        .collect()
 }
