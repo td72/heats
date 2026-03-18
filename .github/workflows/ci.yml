@@ -34,3 +34,6 @@ jobs:
 
       - name: cargo build
         run: cargo build --target ${{ matrix.target }}
+
+      - name: cargo test
+        run: cargo test --target ${{ matrix.target }}
