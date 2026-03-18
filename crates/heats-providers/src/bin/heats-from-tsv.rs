@@ -28,7 +28,11 @@ fn main() {
             continue;
         }
 
-        let cols: Vec<&str> = line.split(opts.delimiter).collect();
+        let cols: Vec<&str> = if opts.collapse {
+            split_collapse(&line, opts.delimiter, opts.max_col)
+        } else {
+            line.split(opts.delimiter).collect()
+        };
 
         let title = match get_col(&cols, opts.title_col) {
             Some(s) => s.to_string(),
@@ -77,6 +81,38 @@ fn main() {
     }
 }
 
+/// Split a line by delimiter, collapsing consecutive delimiters.
+/// Once `max_col - 1` columns have been collected, the remainder of the line
+/// (with leading delimiters stripped) becomes the last column.
+fn split_collapse(line: &str, delimiter: char, max_col: usize) -> Vec<&str> {
+    let mut cols = Vec::new();
+    let mut rest = line;
+    while !rest.is_empty() {
+        // Skip leading delimiters
+        rest = rest.trim_start_matches(delimiter);
+        if rest.is_empty() {
+            break;
+        }
+        // If we've collected max_col - 1 columns, take the rest as-is
+        if cols.len() + 1 >= max_col {
+            cols.push(rest);
+            break;
+        }
+        // Take next token
+        match rest.find(delimiter) {
+            Some(pos) => {
+                cols.push(&rest[..pos]);
+                rest = &rest[pos..];
+            }
+            None => {
+                cols.push(rest);
+                break;
+            }
+        }
+    }
+    cols
+}
+
 fn get_col<'a>(cols: &[&'a str], index: usize) -> Option<&'a str> {
     if index == 0 {
         return None;
@@ -90,6 +126,9 @@ struct Opts {
     data_fields: Vec<(String, usize)>,
     delimiter: char,
     header: bool,
+    collapse: bool,
+    /// Maximum column number referenced (used with --collapse to join remainder into last column)
+    max_col: usize,
 }
 
 fn parse_args(args: &[String]) -> Result<Opts, String> {
@@ -98,6 +137,7 @@ fn parse_args(args: &[String]) -> Result<Opts, String> {
     let mut data_fields: Vec<(String, usize)> = Vec::new();
     let mut delimiter = '\t';
     let mut header = false;
+    let mut collapse = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -140,6 +180,9 @@ fn parse_args(args: &[String]) -> Result<Opts, String> {
             "--header" => {
                 header = true;
             }
+            "--collapse" => {
+                collapse = true;
+            }
             other => {
                 return Err(format!("unknown option: '{other}'"));
             }
@@ -149,12 +192,22 @@ fn parse_args(args: &[String]) -> Result<Opts, String> {
 
     let title_col = title_col.ok_or("--title is required")?;
 
+    let max_col = [title_col]
+        .iter()
+        .copied()
+        .chain(subtitle_cols.iter().copied())
+        .chain(data_fields.iter().map(|(_, c)| *c))
+        .max()
+        .unwrap_or(1);
+
     Ok(Opts {
         title_col,
         subtitle_cols,
         data_fields,
         delimiter,
         header,
+        collapse,
+        max_col,
     })
 }
 
