@@ -4,6 +4,7 @@ use iced::futures::SinkExt;
 use iced::stream::channel;
 use iced::Subscription;
 
+use crate::key_parse::{self, ModifierKind};
 use heats_core::config::ModeConfig;
 
 /// Message emitted by the hotkey subscription
@@ -84,12 +85,12 @@ fn parse_hotkey_str(s: &str) -> (Modifiers, Code) {
 
     let mut mods = Modifiers::empty();
     for part in mod_parts {
-        match part.trim().to_lowercase().as_str() {
-            "cmd" | "super" | "command" | "meta" => mods |= Modifiers::SUPER,
-            "ctrl" | "control" => mods |= Modifiers::CONTROL,
-            "alt" | "option" => mods |= Modifiers::ALT,
-            "shift" => mods |= Modifiers::SHIFT,
-            _ => tracing::warn!("Unknown modifier: {}", part),
+        match key_parse::parse_modifier(part.trim()) {
+            Some(ModifierKind::Super) => mods |= Modifiers::SUPER,
+            Some(ModifierKind::Ctrl) => mods |= Modifiers::CONTROL,
+            Some(ModifierKind::Alt) => mods |= Modifiers::ALT,
+            Some(ModifierKind::Shift) => mods |= Modifiers::SHIFT,
+            None => tracing::warn!("Unknown modifier: {}", part),
         }
     }
 

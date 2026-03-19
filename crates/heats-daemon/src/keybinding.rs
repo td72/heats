@@ -1,5 +1,7 @@
 use iced::keyboard;
 
+use crate::key_parse::{self, ModifierKind};
+
 /// A parsed keybinding (modifier keys + key)
 #[derive(Debug, Clone)]
 pub struct KeyBinding {
@@ -20,12 +22,12 @@ pub fn parse(s: &str) -> Option<KeyBinding> {
     let key_str = parts.last()?;
 
     for &part in &parts[..parts.len() - 1] {
-        match part.to_lowercase().as_str() {
-            "alt" | "option" => modifiers |= keyboard::Modifiers::ALT,
-            "ctrl" | "control" => modifiers |= keyboard::Modifiers::CTRL,
-            "shift" => modifiers |= keyboard::Modifiers::SHIFT,
-            "cmd" | "super" | "command" => modifiers |= keyboard::Modifiers::LOGO,
-            _ => return None,
+        match key_parse::parse_modifier(part) {
+            Some(ModifierKind::Super) => modifiers |= keyboard::Modifiers::LOGO,
+            Some(ModifierKind::Ctrl) => modifiers |= keyboard::Modifiers::CTRL,
+            Some(ModifierKind::Alt) => modifiers |= keyboard::Modifiers::ALT,
+            Some(ModifierKind::Shift) => modifiers |= keyboard::Modifiers::SHIFT,
+            None => return None,
         }
     }
 
