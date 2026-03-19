@@ -29,10 +29,11 @@ pub async fn send_and_receive(
     let (reader, mut writer) = stream.into_split();
 
     // Send context line
-    let context = match format {
-        IpcFormat::Text => r#"{"format":"text"}"#,
-        IpcFormat::Jsonl => r#"{"format":"jsonl"}"#,
+    let format_str = match format {
+        IpcFormat::Text => heats_core::ipc::FORMAT_TEXT,
+        IpcFormat::Jsonl => heats_core::ipc::FORMAT_JSONL,
     };
+    let context = format!(r#"{{"format":"{}"}}"#, format_str);
     writer.write_all(context.as_bytes()).await?;
     writer.write_all(b"\n").await?;
 

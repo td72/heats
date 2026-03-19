@@ -1,5 +1,9 @@
 use std::path::PathBuf;
 
+/// IPC format identifiers used in the context line between client and daemon.
+pub const FORMAT_TEXT: &str = "text";
+pub const FORMAT_JSONL: &str = "jsonl";
+
 /// Resolve the runtime directory for IPC files.
 /// Uses $XDG_RUNTIME_DIR, falling back to /tmp/heats-{uid}.
 /// Creates the directory if it does not exist.

@@ -84,7 +84,7 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                         }
                     };
 
-                let is_jsonl = format == "jsonl";
+                let is_jsonl = format == heats_core::ipc::FORMAT_JSONL;
 
                 // Read remaining lines
                 let mut raw_lines = Vec::new();
