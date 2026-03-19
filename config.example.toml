@@ -68,13 +68,22 @@ evaluators = ["calculator"]
 # {} がないため data.id の値は最初のコマンドの stdin に渡される
 
 [provider.clipboard]
-source = [["heats-list-pbring"]]
+source = [["pbring", "list"], ["heats-from-table", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
 action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
 
 [provider.clipboard.actions.delete]
 command = [["pbring", "delete"]]
 field = "data.id"
+
+# --- Provider: プロセス一覧 (heats-from-table --collapse の活用例) ---
+# ps aux のようなスペース区切りで列幅が不定な出力に対応
+# --collapse: 連続デリミタをまとめ、最大列以降を最後の列に結合
+
+# [provider.processes]
+# source = [["ps", "aux"], ["heats-from-table", "--header", "--delimiter", " ", "--collapse", "--title", "11", "--subtitle", "1,3,4", "--data-field", "pid=2"]]
+# action = [["kill", "{}"]]
+# field = "data.pid"
 
 [[mode]]
 name = "windows"
@@ -88,3 +97,8 @@ providers = ["clipboard"]
 
 [mode.keybindings]
 "Alt+D" = "delete"
+
+# --- ホットキーなしのモード (Ctrl+Tab で切り替え) ---
+# [[mode]]
+# name = "processes"
+# providers = ["processes"]

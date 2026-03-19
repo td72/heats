@@ -24,7 +24,7 @@ hotkey = "Cmd+Semicolon"
 providers = ["open-apps"]
 
 [provider.clipboard]
-source = [["heats-list-pbring"]]
+source = [["pbring", "list"], ["heats-from-table", "--title", "4", "--subtitle", "3,2", "--data-field", "id=1"]]
 action = [["pbring", "get"], ["pbcopy"]]
 field = "data.id"
 
@@ -32,10 +32,19 @@ field = "data.id"
 command = [["pbring", "delete"]]
 field = "data.id"
 
+# [provider.processes]
+# source = [["ps", "aux"], ["heats-from-table", "--header", "--delimiter", " ", "--collapse", "--title", "11", "--subtitle", "1,3,4", "--data-field", "pid=2"]]
+# action = [["kill", "{}"]]
+# field = "data.pid"
+
 [[mode]]
 name = "windows"
 hotkey = "Cmd+Quote"
 providers = ["focus-window"]
+
+# [[mode]]
+# name = "processes"
+# providers = ["processes"]
 
 [[mode]]
 name = "clipboard"

@@ -19,14 +19,21 @@ pub fn init_manager(modes: &[ModeConfig]) -> (GlobalHotKeyManager, Vec<(u32, Str
     let mut mappings = Vec::new();
 
     for mode in modes {
-        let (mods, code) = parse_hotkey_str(&mode.hotkey);
+        let hotkey_str = match &mode.hotkey {
+            Some(h) => h,
+            None => {
+                tracing::info!("Mode '{}' has no hotkey, skipping registration", mode.name);
+                continue;
+            }
+        };
+        let (mods, code) = parse_hotkey_str(hotkey_str);
         let hotkey = HotKey::new(Some(mods), code);
         manager
             .register(hotkey)
             .unwrap_or_else(|e| panic!("Failed to register hotkey for mode '{}': {e}", mode.name));
         tracing::info!(
             "Registered hotkey '{}' for mode '{}'",
-            mode.hotkey,
+            hotkey_str,
             mode.name
         );
         mappings.push((hotkey.id(), mode.name.clone()));

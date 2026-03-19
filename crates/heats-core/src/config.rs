@@ -11,11 +11,11 @@ pub struct Config {
     pub evaluator: HashMap<String, EvaluatorConfig>,
 }
 
-/// A mode: hotkey → providers mapping
+/// A mode: optional hotkey + providers/evaluators mapping
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModeConfig {
     pub name: String,
-    pub hotkey: String,
+    pub hotkey: Option<String>,
     pub providers: Vec<String>,
     #[serde(default)]
     pub evaluators: Vec<String>,
@@ -107,14 +107,14 @@ impl Default for Config {
             mode: vec![
                 ModeConfig {
                     name: "launcher".to_string(),
-                    hotkey: "Cmd+Semicolon".to_string(),
+                    hotkey: Some("Cmd+Semicolon".to_string()),
                     providers: vec!["open-apps".to_string(), "focus-window".to_string()],
                     evaluators: vec!["calculator".to_string()],
                     keybindings: HashMap::new(),
                 },
                 ModeConfig {
                     name: "windows".to_string(),
-                    hotkey: "Cmd+Quote".to_string(),
+                    hotkey: Some("Cmd+Quote".to_string()),
                     providers: vec!["focus-window".to_string()],
                     evaluators: Vec::new(),
                     keybindings: HashMap::new(),
