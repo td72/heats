@@ -339,19 +339,3 @@ fn fallback_main_display() -> DisplayBounds {
         height: b.size.height,
     }
 }
-
-#[allow(dead_code)]
-fn mouse_position() -> (f64, f64) {
-    let source = match core_graphics::event_source::CGEventSource::new(
-        core_graphics::event_source::CGEventSourceStateID::CombinedSessionState,
-    ) {
-        Ok(s) => s,
-        Err(_) => return (0.0, 0.0),
-    };
-    let event = match core_graphics::event::CGEvent::new(source) {
-        Ok(e) => e,
-        Err(_) => return (0.0, 0.0),
-    };
-    let point = event.location();
-    (point.x, point.y)
-}
