@@ -749,25 +749,17 @@ impl State {
             return Task::none();
         }
 
-        self.current_mode_index = Some(new_index);
+        // Read mode data before reset_state() borrows self mutably
         let mode = &self.config.mode[new_index];
-
-        // Reset query and results
-        self.query.clear();
-        self.selected = 0;
-        self.all_items.clear();
-        self.results.clear();
-        self.loaded_items.clear();
-        self.matcher = Matcher::new();
-        self.eval_items.clear();
-        self.eval_generation = 0;
-
-        // Set evaluators and keybindings for new mode
-        self.active_evaluators = mode.evaluators.clone();
-        self.active_keybindings = Self::parse_mode_keybindings(mode);
-
-        // Load providers (cached first, then async)
+        let evaluators = mode.evaluators.clone();
+        let keybindings = Self::parse_mode_keybindings(mode);
         let provider_names = mode.providers.clone();
+
+        // Reset state, then configure for the new mode
+        self.reset_state();
+        self.current_mode_index = Some(new_index);
+        self.active_evaluators = evaluators;
+        self.active_keybindings = keybindings;
         let load_task = self.load_providers_with_cache(&provider_names);
 
         // Refocus search input
@@ -893,6 +885,7 @@ impl State {
     fn reset_state(&mut self) {
         self.query.clear();
         self.selected = 0;
+        self.all_items.clear();
         self.results.clear();
         self.loaded_items.clear();
         self.matcher.update_query("");
