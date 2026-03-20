@@ -79,6 +79,15 @@ fn default_field() -> String {
     "data".to_string()
 }
 
+/// Display bounds in CG coordinates (origin at top-left of main display).
+#[derive(Debug, Clone, Copy)]
+pub struct DisplayBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Window management mode
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -166,8 +175,7 @@ impl Default for WindowConfig {
 }
 
 pub fn load_from(path: &std::path::Path) -> Config {
-    let path = path.to_path_buf();
-    load_path(&path)
+    load_path(path)
 }
 
 pub fn load() -> Config {
@@ -175,7 +183,7 @@ pub fn load() -> Config {
     load_path(&path)
 }
 
-fn load_path(path: &PathBuf) -> Config {
+fn load_path(path: &std::path::Path) -> Config {
     if !path.exists() {
         tracing::info!("No config file found at {:?}, using defaults", path);
         return Config::default();

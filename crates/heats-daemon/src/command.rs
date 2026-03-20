@@ -51,7 +51,7 @@ pub async fn load_from_providers(
                 id: None,
                 title: dmenu_item.title.clone(),
                 subtitle: dmenu_item.subtitle.clone(),
-                exec_path: dmenu_item.get_field("data"),
+                exec_path: dmenu_item.get_field("data").into_owned(),
                 source_name: provider_name.clone(),
                 icon,
             };
@@ -188,21 +188,28 @@ async fn run_pipeline(
         children.push(child);
     }
 
-    // Read all output from the last command
-    let output = if let Some(stdout) = prev_stdout {
-        let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
-        let mut output = String::new();
-        while let Ok(Some(line)) = lines.next_line().await {
-            output.push_str(&line);
-            output.push('\n');
-        }
-        output
-    } else {
-        String::new()
-    };
+    let output = read_all_output(prev_stdout).await;
+    wait_all_children(children).await?;
+    Ok(output)
+}
 
-    // Wait for all children and check exit status
+/// Read all lines from a pipeline's final stdout.
+async fn read_all_output(stdout: Option<tokio::process::ChildStdout>) -> String {
+    let Some(stdout) = stdout else {
+        return String::new();
+    };
+    let reader = BufReader::new(stdout);
+    let mut lines = reader.lines();
+    let mut output = String::new();
+    while let Ok(Some(line)) = lines.next_line().await {
+        output.push_str(&line);
+        output.push('\n');
+    }
+    output
+}
+
+/// Wait for all child processes and check exit status.
+async fn wait_all_children(children: Vec<tokio::process::Child>) -> Result<(), String> {
     for mut child in children {
         let status = child
             .wait()
@@ -212,8 +219,7 @@ async fn run_pipeline(
             return Err(format!("Pipeline command exited with {}", status));
         }
     }
-
-    Ok(output)
+    Ok(())
 }
 
 /// Kill all child processes in a pipeline.

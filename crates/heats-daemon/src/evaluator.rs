@@ -49,7 +49,7 @@ pub async fn run_evaluators(
                 id: None,
                 title: dmenu_item.title.clone(),
                 subtitle: dmenu_item.subtitle.clone(),
-                exec_path: dmenu_item.get_field("data"),
+                exec_path: dmenu_item.get_field("data").into_owned(),
                 source_name: format!("eval:{eval_name}"),
                 icon: None,
             };

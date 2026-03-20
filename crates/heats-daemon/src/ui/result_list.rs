@@ -57,26 +57,7 @@ pub fn view<'a>(
             name.into()
         };
 
-        let row_content: Element<'a, Message> = match &item.icon {
-            Some(IconData::Rgba {
-                width,
-                height,
-                pixels,
-            }) => {
-                let handle =
-                    image::Handle::from_rgba(*width, *height, pixels.as_ref().clone());
-                let icon = image(handle).width(24).height(24);
-                row![icon, text_column]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center)
-                    .into()
-            }
-            Some(IconData::Text(s)) => row![text(s).size(20), text_column]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into(),
-            None => text_column,
-        };
+        let row_content = build_icon_row(text_column, &item.icon);
 
         let row = container(row_content)
             .padding(Padding::from([6, 12]))
@@ -89,4 +70,30 @@ pub fn view<'a>(
     }
 
     rows.into()
+}
+
+/// Combine icon (if any) with the text column into a single row element.
+fn build_icon_row<'a>(
+    text_column: Element<'a, Message>,
+    icon: &'a Option<IconData>,
+) -> Element<'a, Message> {
+    match icon {
+        Some(IconData::Rgba {
+            width,
+            height,
+            pixels,
+        }) => {
+            let handle = image::Handle::from_rgba(*width, *height, pixels.as_ref().clone());
+            let icon = image(handle).width(24).height(24);
+            row![icon, text_column]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+        }
+        Some(IconData::Text(s)) => row![text(s).size(20), text_column]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        None => text_column,
+    }
 }

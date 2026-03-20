@@ -84,7 +84,7 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                         }
                     };
 
-                let is_jsonl = format == "jsonl";
+                let is_jsonl = format == heats_core::ipc::FORMAT_JSONL;
 
                 // Read remaining lines
                 let mut raw_lines = Vec::new();
@@ -134,7 +134,7 @@ fn dmenu_stream() -> impl iced::futures::Stream<Item = Message> {
                                     id: Some(idx),
                                     title: di.title.clone(),
                                     subtitle: di.subtitle.clone(),
-                                    exec_path: di.get_field("data"),
+                                    exec_path: di.get_field("data").into_owned(),
                                     source_name: "dmenu".to_string(),
                                     icon: None,
                                 }),

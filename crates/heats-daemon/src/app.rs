@@ -14,8 +14,7 @@ use crate::ipc_server;
 use crate::keybinding::{self, KeyBinding};
 use crate::matcher::engine::Matcher;
 use crate::ui::{result_list, search_input, tab_bar, theme};
-use heats_core::config::Config;
-use heats_core::config::WindowMode;
+use heats_core::config::{Config, DisplayBounds, WindowMode};
 use heats_core::source::SourceItem;
 
 pub struct State {
@@ -31,7 +30,7 @@ pub struct State {
     /// Whether the launcher is currently shown
     visible: bool,
     /// Fixed display bounds (only used in Fixed mode)
-    fixed_display: (f64, f64, f64, f64),
+    fixed_display: DisplayBounds,
 
     _hotkey_manager: global_hotkey::GlobalHotKeyManager,
     hotkey_modes: Vec<(u32, String)>,
@@ -239,58 +238,10 @@ impl State {
                     Task::none()
                 }
             }
-            Message::Execute => {
-                let eval_count = self.eval_items.len();
-                if self.selected < eval_count {
-                    // Selected an evaluator result
-                    let eval_action = self.pending_eval_action(self.selected);
-                    let hide_task = self.hide();
-                    if let Some((config, dmenu_item)) = eval_action {
-                        command::run_action(&config, &dmenu_item);
-                    }
-                    return hide_task;
-                }
-
-                let adjusted = self.selected - eval_count;
-                if let Some(item) = self.results.get(adjusted) {
-                    if self.is_dmenu_session {
-                        self.send_dmenu_response(item.id);
-                    }
-                }
-                // Capture action info before hide() clears state
-                let action = self.pending_action(adjusted);
-                // Hide first so macOS deactivates Heats before the action
-                // activates the target app — avoids focus bounce-back
-                let hide_task = self.hide();
-                if let Some((provider, dmenu_item)) = action {
-                    command::execute_action(&provider, &dmenu_item);
-                }
-                hide_task
-            }
+            Message::Execute => self.execute_selected(),
             Message::SelectAndExecute(index) => {
                 self.selected = index;
-                let eval_count = self.eval_items.len();
-                if index < eval_count {
-                    let eval_action = self.pending_eval_action(index);
-                    let hide_task = self.hide();
-                    if let Some((config, dmenu_item)) = eval_action {
-                        command::run_action(&config, &dmenu_item);
-                    }
-                    return hide_task;
-                }
-
-                let adjusted = index - eval_count;
-                if let Some(item) = self.results.get(adjusted) {
-                    if self.is_dmenu_session {
-                        self.send_dmenu_response(item.id);
-                    }
-                }
-                let action = self.pending_action(adjusted);
-                let hide_task = self.hide();
-                if let Some((provider, dmenu_item)) = action {
-                    command::execute_action(&provider, &dmenu_item);
-                }
-                hide_task
+                self.execute_selected()
             }
             Message::ItemsLoaded(loaded_items) => {
                 // Ignore items while a dmenu session is active
@@ -304,9 +255,7 @@ impl State {
                 } else {
                     self.loaded_items.extend(loaded_items);
                 }
-                self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
-                self.matcher.set_items(self.all_items.clone());
-                self.results = self.all_items.clone();
+                self.apply_loaded_items();
                 // No focus call here — WindowOpened already handled focus
                 Task::none()
             }
@@ -588,11 +537,7 @@ impl State {
             return None;
         }
         let selected_item = self.results.get(selected_index)?;
-        let loaded = self.loaded_items.iter().find(|li| {
-            li.item.title == selected_item.title
-                && li.item.source_name == selected_item.source_name
-                && li.item.exec_path == selected_item.exec_path
-        })?;
+        let loaded = self.find_loaded_item(selected_item)?;
         let provider = self.config.provider.get(&loaded.provider_name)?;
         Some((provider.clone(), loaded.dmenu_item.clone()))
     }
@@ -607,11 +552,7 @@ impl State {
             return None;
         }
         let selected_item = self.results.get(selected_index)?;
-        let loaded = self.loaded_items.iter().find(|li| {
-            li.item.title == selected_item.title
-                && li.item.source_name == selected_item.source_name
-                && li.item.exec_path == selected_item.exec_path
-        })?;
+        let loaded = self.find_loaded_item(selected_item)?;
         let provider = self.config.provider.get(&loaded.provider_name)?;
         let action_config = provider.actions.get(action_name)?;
         let field = action_config
@@ -698,36 +639,7 @@ impl State {
 
         self.visible = true;
 
-        // Split providers into cached (instant) and uncached (need async load)
-        let mut cached_items: Vec<LoadedItem> = Vec::new();
-        let mut uncached_names: Vec<String> = Vec::new();
-
-        for name in &provider_names {
-            if let Some(items) = self.provider_cache.get(name) {
-                cached_items.extend(items.clone());
-            } else {
-                uncached_names.push(name.clone());
-            }
-        }
-
-        // Pre-populate with cached items immediately
-        if !cached_items.is_empty() {
-            self.loaded_items = cached_items;
-            self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
-            self.matcher.set_items(self.all_items.clone());
-            self.results = self.all_items.clone();
-        }
-
-        // Load uncached providers asynchronously (if any)
-        let load_task = if uncached_names.is_empty() {
-            Task::none()
-        } else {
-            let providers = self.config.provider.clone();
-            Task::perform(
-                async move { command::load_from_providers(&uncached_names, &providers).await },
-                Message::ItemsLoaded,
-            )
-        };
+        let load_task = self.load_providers_with_cache(&provider_names);
 
         match self.config.window.mode {
             WindowMode::Fixed => self.show_fixed(load_task),
@@ -814,13 +726,12 @@ impl State {
     // ---- Helpers ----
 
     fn center_on_display(
-        display: &(f64, f64, f64, f64),
+        display: &DisplayBounds,
         win_w: f32,
         win_h: f32,
     ) -> Point {
-        let (disp_x, disp_y, disp_w, disp_h) = *display;
-        let x = disp_x + (disp_w - win_w as f64) / 2.0;
-        let y = disp_y + (disp_h - win_h as f64) / 3.0;
+        let x = display.x + (display.width - win_w as f64) / 2.0;
+        let y = display.y + (display.height - win_h as f64) / 3.0;
         Point::new(x as f32, y as f32)
     }
 
@@ -838,52 +749,18 @@ impl State {
             return Task::none();
         }
 
-        self.current_mode_index = Some(new_index);
+        // Read mode data before reset_state() borrows self mutably
         let mode = &self.config.mode[new_index];
-
-        // Reset query and results
-        self.query.clear();
-        self.selected = 0;
-        self.all_items.clear();
-        self.results.clear();
-        self.loaded_items.clear();
-        self.matcher = Matcher::new();
-        self.eval_items.clear();
-        self.eval_generation = 0;
-
-        // Set evaluators and keybindings for new mode
-        self.active_evaluators = mode.evaluators.clone();
-        self.active_keybindings = Self::parse_mode_keybindings(mode);
-
-        // Load providers (cached first, then async)
+        let evaluators = mode.evaluators.clone();
+        let keybindings = Self::parse_mode_keybindings(mode);
         let provider_names = mode.providers.clone();
-        let mut cached_items: Vec<LoadedItem> = Vec::new();
-        let mut uncached_names: Vec<String> = Vec::new();
 
-        for name in &provider_names {
-            if let Some(items) = self.provider_cache.get(name) {
-                cached_items.extend(items.clone());
-            } else {
-                uncached_names.push(name.clone());
-            }
-        }
-
-        if !cached_items.is_empty() {
-            self.loaded_items = cached_items;
-            self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
-            self.matcher.set_items(self.all_items.clone());
-            self.results = self.all_items.clone();
-        }
-
-        let load_task = if uncached_names.is_empty() {
-            Task::none()
-        } else {
-            let providers = self.config.provider.clone();
-            Task::perform(
-                async move { command::load_from_providers(&uncached_names, &providers).await },
-                Message::ItemsLoaded,
-            )
-        };
+        // Reset state, then configure for the new mode
+        self.reset_state();
+        self.current_mode_index = Some(new_index);
+        self.active_evaluators = evaluators;
+        self.active_keybindings = keybindings;
+        let load_task = self.load_providers_with_cache(&provider_names);
 
         // Refocus search input
         let focus_task = iced::widget::operation::focus(search_input::SEARCH_INPUT_ID);
@@ -917,9 +794,98 @@ impl State {
             .collect()
     }
 
+    /// Build all_items from loaded_items, feed them into the matcher, and set results.
+    /// Used after loading items (from cache or async providers).
+    fn apply_loaded_items(&mut self) {
+        self.all_items = self.loaded_items.iter().map(|li| li.item.clone()).collect();
+        self.matcher.set_items(self.all_items.clone());
+        self.results = self.all_items.clone();
+    }
+
+    /// Find the LoadedItem matching a SourceItem by title + source_name + exec_path.
+    fn find_loaded_item(&self, item: &SourceItem) -> Option<&LoadedItem> {
+        self.loaded_items.iter().find(|li| {
+            li.item.title == item.title
+                && li.item.source_name == item.source_name
+                && li.item.exec_path == item.exec_path
+        })
+    }
+
+    /// Execute the currently selected item (shared logic for Execute and SelectAndExecute).
+    fn execute_selected(&mut self) -> Task<Message> {
+        let eval_count = self.eval_items.len();
+        if self.selected < eval_count {
+            let eval_action = self.pending_eval_action(self.selected);
+            let hide_task = self.hide();
+            if let Some((config, dmenu_item)) = eval_action {
+                command::run_action(&config, &dmenu_item);
+            }
+            return hide_task;
+        }
+
+        let adjusted = self.selected - eval_count;
+        if let Some(item) = self.results.get(adjusted) {
+            if self.is_dmenu_session {
+                self.send_dmenu_response(item.id);
+            }
+        }
+        let action = self.pending_action(adjusted);
+        let hide_task = self.hide();
+        if let Some((provider, dmenu_item)) = action {
+            command::execute_action(&provider, &dmenu_item);
+        }
+        hide_task
+    }
+
+    /// Split providers into cached (instant) and uncached (need async load),
+    /// populate loaded_items with cached items, and return a Task for uncached providers.
+    fn load_providers_with_cache(&mut self, provider_names: &[String]) -> Task<Message> {
+        let mut cached_items: Vec<LoadedItem> = Vec::new();
+        let mut uncached_names: Vec<String> = Vec::new();
+
+        for name in provider_names {
+            if let Some(items) = self.provider_cache.get(name) {
+                cached_items.extend(items.clone());
+            } else {
+                uncached_names.push(name.clone());
+            }
+        }
+
+        if !cached_items.is_empty() {
+            self.loaded_items = cached_items;
+            self.apply_loaded_items();
+        }
+
+        if uncached_names.is_empty() {
+            Task::none()
+        } else {
+            let providers = self.config.provider.clone();
+            Task::perform(
+                async move { command::load_from_providers(&uncached_names, &providers).await },
+                Message::ItemsLoaded,
+            )
+        }
+    }
+
+    /// Create a cache load Task for a single provider.
+    fn cache_load_task(name: String, provider: &heats_core::config::ProviderConfig) -> Task<Message> {
+        let name_for_msg = name.clone();
+        let providers = HashMap::from([(name.clone(), provider.clone())]);
+        Task::perform(
+            async move {
+                command::load_from_providers(&[name], &providers).await
+            },
+            move |items| Message::CacheUpdated {
+                provider_name: name_for_msg,
+                items,
+            },
+        )
+    }
+
     fn reset_state(&mut self) {
         self.query.clear();
         self.selected = 0;
+        self.all_items.clear();
         self.results.clear();
         self.loaded_items.clear();
         self.matcher.update_query("");
@@ -950,20 +916,7 @@ impl State {
             .provider
             .iter()
             .filter(|(_, p)| p.cache_interval.is_some())
-            .map(|(name, p)| {
-                let name = name.clone();
-                let name_for_msg = name.clone();
-                let providers = HashMap::from([(name.clone(), p.clone())]);
-                Task::perform(
-                    async move {
-                        command::load_from_providers(&[name], &providers).await
-                    },
-                    move |items| Message::CacheUpdated {
-                        provider_name: name_for_msg,
-                        items,
-                    },
-                )
-            })
+            .map(|(name, p)| Self::cache_load_task(name.clone(), p))
             .collect();
 
         if tasks.is_empty() {
@@ -987,25 +940,9 @@ impl State {
                     .get(name)
                     .map(|t| now.duration_since(*t) >= interval)
                     .unwrap_or(true);
-                if is_stale {
-                    Some((name.clone(), p.clone()))
-                } else {
-                    None
-                }
+                if is_stale { Some((name, p)) } else { None }
             })
-            .map(|(name, p)| {
-                let name_for_msg = name.clone();
-                let providers = HashMap::from([(name.clone(), p)]);
-                Task::perform(
-                    async move {
-                        command::load_from_providers(&[name], &providers).await
-                    },
-                    move |items| Message::CacheUpdated {
-                        provider_name: name_for_msg,
-                        items,
-                    },
-                )
-            })
+            .map(|(name, p)| Self::cache_load_task(name.clone(), p))
             .collect();
 
         if tasks.is_empty() {

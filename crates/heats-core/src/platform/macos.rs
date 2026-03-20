@@ -1,5 +1,6 @@
 use std::process::Command;
 
+use crate::config::DisplayBounds;
 use core_graphics::display::CGDisplay;
 use objc::runtime::Object;
 use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
@@ -88,7 +89,7 @@ pub fn bundle_path_for_pid(pid: i32) -> Option<String> {
 
 /// Get the bounds of the display that has keyboard focus (NSScreen.mainScreen).
 /// NSScreen.mainScreen returns the screen containing the window currently receiving keyboard events.
-pub fn focused_display_bounds() -> (f64, f64, f64, f64) {
+pub fn focused_display_bounds() -> DisplayBounds {
     unsafe {
         let main_screen: *mut Object = msg_send![class!(NSScreen), mainScreen];
         if !main_screen.is_null() {
@@ -99,12 +100,12 @@ pub fn focused_display_bounds() -> (f64, f64, f64, f64) {
                     "focused_display_bounds: NSScreen.mainScreen → CGDisplayID={}, bounds=({}, {}, {}, {})",
                     display_id, bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height
                 );
-                return (
-                    bounds.origin.x,
-                    bounds.origin.y,
-                    bounds.size.width,
-                    bounds.size.height,
-                );
+                return DisplayBounds {
+                    x: bounds.origin.x,
+                    y: bounds.origin.y,
+                    width: bounds.size.width,
+                    height: bounds.size.height,
+                };
             }
         }
     }
@@ -129,7 +130,7 @@ unsafe fn screen_display_id(screen: *mut Object) -> Option<u32> {
 
 /// Get the bounds of a display by name (substring match).
 /// Returns CG coordinates (origin at top-left of main display).
-pub fn display_bounds_by_name(name: &str) -> (f64, f64, f64, f64) {
+pub fn display_bounds_by_name(name: &str) -> DisplayBounds {
     let screens = list_screens();
     let name_lower = name.to_lowercase();
 
@@ -146,12 +147,12 @@ pub fn display_bounds_by_name(name: &str) -> (f64, f64, f64, f64) {
                 bounds.size.width,
                 bounds.size.height
             );
-            return (
-                bounds.origin.x,
-                bounds.origin.y,
-                bounds.size.width,
-                bounds.size.height,
-            );
+            return DisplayBounds {
+                x: bounds.origin.x,
+                y: bounds.origin.y,
+                width: bounds.size.width,
+                height: bounds.size.height,
+            };
         }
     }
 
@@ -273,12 +274,10 @@ unsafe fn find_heats_window() -> Option<*mut Object> {
 
 /// Show the Heats window at the center of the given display (CG coordinates).
 /// Uses NSWindow.setFrame + makeKeyAndOrderFront (like Raycast).
-pub fn native_show_window(display: &(f64, f64, f64, f64), win_w: f64, win_h: f64) {
-    let (disp_x, disp_y, disp_w, disp_h) = *display;
-
+pub fn native_show_window(display: &DisplayBounds, win_w: f64, win_h: f64) {
     // Center position in CG coordinates (origin = top-left of main display, y down)
-    let cg_x = disp_x + (disp_w - win_w) / 2.0;
-    let cg_y = disp_y + (disp_h - win_h) / 3.0;
+    let cg_x = display.x + (display.width - win_w) / 2.0;
+    let cg_y = display.y + (display.height - win_h) / 3.0;
 
     // Convert CG → AppKit coordinates (origin = bottom-left of main display, y up)
     let main_height = CGDisplay::main().bounds().size.height;
@@ -330,24 +329,13 @@ pub fn native_hide_window() {
     }
 }
 
-fn fallback_main_display() -> (f64, f64, f64, f64) {
+fn fallback_main_display() -> DisplayBounds {
     let main = CGDisplay::main();
     let b = main.bounds();
-    (b.origin.x, b.origin.y, b.size.width, b.size.height)
-}
-
-#[allow(dead_code)]
-fn mouse_position() -> (f64, f64) {
-    let source = match core_graphics::event_source::CGEventSource::new(
-        core_graphics::event_source::CGEventSourceStateID::CombinedSessionState,
-    ) {
-        Ok(s) => s,
-        Err(_) => return (0.0, 0.0),
-    };
-    let event = match core_graphics::event::CGEvent::new(source) {
-        Ok(e) => e,
-        Err(_) => return (0.0, 0.0),
-    };
-    let point = event.location();
-    (point.x, point.y)
+    DisplayBounds {
+        x: b.origin.x,
+        y: b.origin.y,
+        width: b.size.width,
+        height: b.size.height,
+    }
 }

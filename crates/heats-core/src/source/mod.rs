@@ -1,6 +1,7 @@
 pub mod applications;
 pub mod windows;
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// JSONL protocol type: the schema for source command → daemon communication
@@ -17,44 +18,50 @@ pub struct DmenuItem {
 
 impl DmenuItem {
     /// Get a field value by dot-separated path (e.g. "title", "data.pid")
-    pub fn get_field(&self, field: &str) -> String {
+    pub fn get_field(&self, field: &str) -> Cow<'_, str> {
         match field {
-            "title" => self.title.clone(),
-            "subtitle" => self.subtitle.clone().unwrap_or_default(),
-            "icon_path" => self.icon_path.clone().unwrap_or_default(),
+            "title" => Cow::Borrowed(&self.title),
+            "subtitle" => match &self.subtitle {
+                Some(s) => Cow::Borrowed(s),
+                None => Cow::Borrowed(""),
+            },
+            "icon_path" => match &self.icon_path {
+                Some(s) => Cow::Borrowed(s),
+                None => Cow::Borrowed(""),
+            },
             _ if field.starts_with("data") => {
                 let data = match &self.data {
                     Some(v) => v,
-                    None => return self.title.clone(),
+                    None => return Cow::Borrowed(&self.title),
                 };
                 if field == "data" {
-                    value_to_string(data)
+                    value_to_cow(data)
                 } else if let Some(rest) = field.strip_prefix("data.") {
                     let mut current = data;
                     for key in rest.split('.') {
                         match current.get(key) {
                             Some(v) => current = v,
-                            None => return String::new(),
+                            None => return Cow::Borrowed(""),
                         }
                     }
-                    value_to_string(current)
+                    value_to_cow(current)
                 } else {
-                    self.title.clone()
+                    Cow::Borrowed(&self.title)
                 }
             }
-            _ => self.title.clone(),
+            _ => Cow::Borrowed(&self.title),
         }
     }
 }
 
-/// Convert a JSON value to a plain string for action arguments
-fn value_to_string(v: &serde_json::Value) -> String {
+/// Convert a JSON value to a Cow string for action arguments
+fn value_to_cow(v: &serde_json::Value) -> Cow<'_, str> {
     match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => String::new(),
-        other => other.to_string(),
+        serde_json::Value::String(s) => Cow::Borrowed(s),
+        serde_json::Value::Number(n) => Cow::Owned(n.to_string()),
+        serde_json::Value::Bool(b) => Cow::Owned(b.to_string()),
+        serde_json::Value::Null => Cow::Borrowed(""),
+        other => Cow::Owned(other.to_string()),
     }
 }
 
